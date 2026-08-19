@@ -256,6 +256,21 @@ MODEL_CATALOG = {
     },
 }
 
+# Claude Code exposes three fixed custom slots. Keep these mappings separate from
+# the OpenAI-compatible model catalog so other adapters remain unchanged.
+CLAUDE_MODEL_SLOTS = {
+    "personal-general": {
+        "opus": "deepseek-v4-pro-202606",
+        "sonnet": "glm-5.2",
+        "haiku": "deepseek-v4-flash-202605",
+    },
+    "enterprise-pro": {
+        "opus": "deepseek-v4-pro-202606",
+        "sonnet": "glm-5.2",
+        "haiku": "deepseek-v4-flash-202605",
+    },
+}
+
 
 PLAN_CATALOG: Dict[str, PlanSpec] = {
     "1": PlanSpec(
@@ -319,8 +334,9 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "终端输入: claude",
             "切换模型: claude --model <模型ID>",
             "完整模型选择器: claude-tokenplan",
-            "Claude 内置 /model 只显示固定槽位，不是 Token Plan 完整目录",
-            "也可直接运行: claude --model <模型ID>",
+            "重要: Claude 内置 /model 只显示固定槽位，不能显示全部 Token Plan 模型",
+            "其它模型请用 claude --model <模型ID>，或运行 claude-tokenplan 选择",
+            "已启用 high 思考强度；glm-5.3 始终思考，不支持关闭思考（可用 low、high 或 max）",
         ),
     ),
     ToolSpec(
@@ -331,7 +347,13 @@ TOOLS: Tuple[ToolSpec, ...] = (
         install_cmd=("npm", "install", "-g", "@openai/codex@latest"),
         start_hint="codex",
         cfg_hint="~/.codex/config.toml",
-        usage_lines=("终端输入: codex", "模型已配置，可直接使用"),
+        usage_lines=(
+            "终端输入: codex",
+            "模型已配置，可直接使用",
+            "重要: Codex 内置 /model 只显示官方 OpenAI 模型，不是 Token Plan 模型目录",
+            "请勿在 /model 中选择 GPT 模型；切换请退出后运行 codex -m <Token Plan 模型ID>",
+            "永久切换可修改 ~/.codex/config.toml 中的 model 字段",
+        ),
     ),
     ToolSpec(
         key="hermes",
@@ -399,7 +421,11 @@ TOOLS: Tuple[ToolSpec, ...] = (
         install_cmd=("code", "--install-extension", "saoudrizwan.claude-dev"),
         start_hint="VS Code → Cline",
         cfg_hint="Cline 插件设置",
-        usage_lines=("在 VS Code 中打开 Cline 插件面板",),
+        usage_lines=(
+            "安装后重启 VS Code",
+            "按 Cmd+Shift+X 搜索 Cline，或执行 code --list-extensions 检查",
+            "如果 VS Code 是从 App Store 安装，需在该 VS Code 内打开命令面板安装",
+        ),
     ),
     ToolSpec(
         key="kilo-code",
@@ -409,7 +435,10 @@ TOOLS: Tuple[ToolSpec, ...] = (
         install_cmd=("code", "--install-extension", "kilocode.kilocode"),
         start_hint="VS Code → Kilo Code",
         cfg_hint="Kilo Code 插件设置",
-        usage_lines=("在 VS Code 中打开 Kilo Code 插件面板",),
+        usage_lines=(
+            "安装后重启 VS Code",
+            "按 Cmd+Shift+X 搜索 Kilo Code，或执行 code --list-extensions 检查",
+        ),
     ),
 )
 
@@ -498,7 +527,7 @@ def install_claude_tokenplan_path() -> None:
     path_line = f'export PATH="{launcher_dir}:$PATH"'
     if marker not in existing:
         rc_path.parent.mkdir(parents=True, exist_ok=True)
-        rc_path.write_text(existing.rstrip() + f"\\n{marker}\\n{path_line}\\n")
+        rc_path.write_text(existing.rstrip() + f"\n{marker}\n{path_line}\n")
     current_path = os.environ.get("PATH", "")
     if str(launcher_dir) not in current_path.split(":"):
         os.environ["PATH"] = f"{launcher_dir}:{current_path}"
@@ -537,7 +566,30 @@ def ensure_npm_bin_on_path() -> None:
     info(f"npm 全局命令路径已加入: {npm_bin}")
 
 
+PLUGIN_EXTENSION_IDS = {
+    "cline": "saoudrizwan.claude-dev",
+    "kilo-code": "kilocode.kilocode",
+}
+
+
 def is_tool_installed(tool: ToolSpec) -> bool:
+    if tool.backend == "plugin":
+        code = shutil.which("code")
+        extension_id = PLUGIN_EXTENSION_IDS.get(tool.key)
+        if not code or not extension_id:
+            return False
+        try:
+            result = subprocess.run(
+                [code, "--list-extensions"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return False
+        return extension_id.lower() in {
+            line.strip().lower() for line in result.stdout.splitlines()
+        }
     return bool(tool.check_exe and shutil.which(tool.check_exe))
 
 
@@ -733,14 +785,25 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     catalog = get_model_catalog(plan.key)
     default_model = str(catalog["default"])
     model_ids = get_model_ids(plan.key)
+    claude_slots = CLAUDE_MODEL_SLOTS.get(plan.key, {})
+    env = {
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_BASE_URL": anthropic_url,
+        "ANTHROPIC_MODEL": default_model,
+        "CLAUDE_CODE_EFFORT_LEVEL": "high",
+    }
+    if claude_slots:
+        env.update(
+            {
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": claude_slots["opus"],
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": claude_slots["sonnet"],
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": claude_slots["haiku"],
+            }
+        )
     write_json(
         cfg_path(".claude", "settings.json"),
         {
-            "env": {
-                "ANTHROPIC_AUTH_TOKEN": api_key,
-                "ANTHROPIC_BASE_URL": anthropic_url,
-                "ANTHROPIC_MODEL": default_model,
-            },
+            "env": env,
             "model": default_model,
             "tokenplan": {
                 "provider": "anthropic",
@@ -772,10 +835,19 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
         "  *) model=$(printf '%s\\n' $models | sed -n \"${choice}p\") ;;\n"
         "esac\n"
         "[ -n \"$model\" ] || { printf '无效选择\\n' >&2; exit 1; }\n"
-        "exec claude --model \"$model\" \"$@\"\n"
+        "CLAUDE_CODE_EFFORT_LEVEL=\"${CLAUDE_CODE_EFFORT_LEVEL:-high}\" exec claude --model \"$model\" \"$@\"\n"
     )
     launcher.chmod(0o755)
     install_claude_tokenplan_path()
+
+
+def get_codex_default_model(plan_key: str) -> str:
+    catalog = get_model_catalog(plan_key)
+    default_model = str(catalog["default"])
+    if default_model != "auto":
+        return default_model
+    model_ids = get_model_ids(plan_key)
+    return next((model for model in model_ids if model != "auto"), default_model)
 
 
 def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
@@ -783,12 +855,12 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
     backup_file(path)
     path.write_text(
         'model_provider = "TencentCloud"\n'
-        'model = "auto"\n\n'
+        f'model = "{get_codex_default_model(plan.key)}"\n\n'
         '[model_providers.TencentCloud]\n'
         'name = "TencentCloud"\n'
         f'base_url = "{base_url}"\n'
         'env_key = "Token_Plan_API_KEY"\n'
-        'wire_api = "chat"\n'
+        'wire_api = "responses"\n'
     )
     write_env(cfg_path(".codex", ".env"), Token_Plan_API_KEY=api_key, OPENAI_BASE_URL=base_url)
 

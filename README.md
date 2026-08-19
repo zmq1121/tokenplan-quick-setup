@@ -33,3 +33,40 @@
 - ✅ 进度条 + 旋转动画
 - ✅ 前置检查（Node.js、npm、curl）
 - ✅ 完成后汇总报告
+
+## Claude Code 模型选择说明
+
+Claude Code 的内置 `/model` 菜单只能显示 Claude Code 支持的固定槽位，不能把 Token Plan 的全部模型都加入菜单。
+
+- `/model`：只能显示 Claude Code 的固定模型槽位；
+- `claude --model <模型ID>`：直接使用指定的其它 Token Plan 模型；
+- `claude-tokenplan`：列出当前产品线的完整模型列表，选择后自动启动 Claude Code。
+
+例如：
+
+```bash
+claude --model glm-5.2
+claude-tokenplan
+```
+
+如果新终端提示找不到 `claude-tokenplan`，先执行：
+
+```bash
+source ~/.zshrc
+```
+
+完整模型目录会写入：
+
+```text
+~/.claude/tokenplan-models.json
+```
+
+## Codex 模型说明
+
+Codex 使用 Token Plan 时，脚本会优先写入当前套餐中的具体默认模型，并使用新版 `responses` 接口。对于只有 Auto 路由的轻享套餐仍会保留 `auto`；其它有具体模型的套餐不要把 `model` 手动改成 `auto`，否则新版 Codex 可能提示：
+
+```text
+Model metadata for `auto` not found
+```
+
+重新运行脚本配置 Codex 后即可恢复正确的默认模型。

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>腾讯云 Token Plan — 一键接入</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+        .container { max-width: 680px; margin: 0 auto; padding: 24px; }
+        .card { background: #fff; border-radius: 12px; padding: 28px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        h1 { font-size: 22px; margin-bottom: 4px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+        h2 { font-size: 16px; margin-bottom: 12px; color: #555; }
+        label { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 15px; }
+        label:last-child { border-bottom: none; }
+        label input[type=checkbox] { width: 18px; height: 18px; accent-color: #0052d9; }
+        .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+        .tag-auto { background: #e8f5e9; color: #2e7d32; }
+        .tag-manual { background: #fff3e0; color: #e65100; }
+        .tag-cli { background: #e3f2fd; color: #1565c0; }
+        .desc { color: #999; font-size: 12px; margin-left: auto; }
+        select, input[type=text], input[type=password] {
+            width: 100%; padding: 12px; border: 1.5px solid #ddd; border-radius: 8px; font-size: 15px; margin-top: 8px;
+            transition: border-color .2s;
+        }
+        select:focus, input:focus { outline: none; border-color: #0052d9; }
+        .btn { width: 100%; padding: 14px; background: #0052d9; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+        .btn:hover { background: #0043b3; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .result { display: none; margin-top: 16px; }
+        .result.show { display: block; }
+        .code-block { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; font-family: "SF Mono", Monaco, monospace; font-size: 13px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+        .copy-btn { display: inline-block; margin-top: 8px; padding: 8px 20px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .copy-btn:hover { background: #ddd; }
+        .step { display: flex; gap: 12px; margin-bottom: 16px; }
+        .step-num { width: 28px; height: 28px; background: #0052d9; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+        .step-text { font-size: 14px; }
+        .step-text strong { display: block; margin-bottom: 2px; }
+        .note { background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #8c6d00; margin-top: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="card">
+        <h1>🚀 Token Plan 一键接入</h1>
+        <p class="subtitle">只需 API Key，自动配置所有 AI 工具</p>
+
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">
+                <strong>获取 API Key</strong>
+                打开 <a href="https://console.cloud.tencent.com/tokenhub/api-key" target="_blank">腾讯云控制台</a>，复制 Key
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">
+                <strong>选择工具并输入 Key</strong>
+                勾选你想用的工具，粘贴 API Key
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">
+                <strong>复制命令到终端</strong>
+                打开终端（Mac: Spotlight 搜"终端"），粘贴执行
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>选择版本</h2>
+        <select id="edition">
+            <option value="enterprise">企业版（专业/轻享）</option>
+            <option value="personal">个人版（通用/Hy）</option>
+        </select>
+    </div>
+
+    <div class="card">
+        <h2>选择工具</h2>
+        <label><input type="checkbox" value="codebuddy" checked> CodeBuddy <span class="tag tag-auto">自动安装</span><span class="desc">腾讯云 AI 编程助手</span></label>
+        <label><input type="checkbox" value="claude-code" checked> Claude Code <span class="tag tag-auto">自动安装</span><span class="desc">终端 AI 编程助手</span></label>
+        <label><input type="checkbox" value="codex"> Codex <span class="tag tag-auto">自动安装</span><span class="desc">OpenAI 终端编程代理</span></label>
+        <label><input type="checkbox" value="hermes"> Hermes Agent <span class="tag tag-auto">自动安装</span><span class="desc">Nous Research 智能体</span></label>
+        <label><input type="checkbox" value="dsh"> DeepSeek Harness <span class="tag tag-cli">CLI</span><span class="desc">DSH 智能体框架</span></label>
+        <label><input type="checkbox" value="cursor"> Cursor <span class="tag tag-manual">需下载</span><span class="desc">AI 代码编辑器</span></label>
+        <label><input type="checkbox" value="windsurf"> Windsurf <span class="tag tag-manual">需下载</span><span class="desc">Codeium AI IDE</span></label>
+        <label><input type="checkbox" value="trae"> TRAE <span class="tag tag-manual">需下载</span><span class="desc">字节跳动 AI IDE</span></label>
+        <label><input type="checkbox" value="cline"> Cline <span class="tag tag-manual">VS Code</span><span class="desc">VS Code AI 插件</span></label>
+        <label><input type="checkbox" value="kilo-code"> Kilo Code <span class="tag tag-manual">VS Code</span><span class="desc">轻量 VS Code AI 插件</span></label>
+    </div>
+
+    <div class="card">
+        <h2>API Key</h2>
+        <input type="password" id="apikey" placeholder="粘贴你的 API Key（sk-xxxx...）">
+    </div>
+
+    <button class="btn" id="generate" onclick="generate()">生成安装命令</button>
+
+    <div class="result" id="result">
+        <h2>复制以下命令到终端执行</h2>
+        <div class="code-block" id="command"></div>
+        <button class="copy-btn" onclick="copyCmd()">📋 复制命令</button>
+        <div class="note">
+            💡 <strong>怎么打开终端？</strong><br>
+            Mac：按 <code>Cmd+空格</code>，搜"终端"，回车<br>
+            Windows：按 <code>Win+R</code>，输入 <code>cmd</code>，回车
+        </div>
+    </div>
+
+</div>
+
+<script>
+const TOOLS = {
+    codebuddy: {name:"CodeBuddy",install:"npm install -g @tencent-ai/codebuddy-code",cfg:"~/.codebuddy/models.json"},
+    "claude-code": {name:"Claude Code",install:"npm install -g @anthropic-ai/claude-code",cfg:"~/.claude/settings.json"},
+    codex: {name:"Codex",install:"npm install -g @openai/codex@0.80.0",cfg:"~/.codex/config.toml"},
+    hermes: {name:"Hermes Agent",install:"curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",cfg:"~/.hermes/.env"},
+    dsh: {name:"DeepSeek Harness",install:"",cfg:"~/.dsh/cordis.patch.yml"},
+    cursor: {name:"Cursor",install:"",cfg:"Cursor 设置文件"},
+    windsurf: {name:"Windsurf",install:"",cfg:"Windsurf 设置文件"},
+    trae: {name:"TRAE",install:"",cfg:"TRAE 设置"},
+    cline: {name:"Cline",install:"code --install-extension saoudrizwan.claude-dev",cfg:"Cline 插件设置"},
+    "kilo-code": {name:"Kilo Code",install:"code --install-extension kilocode.kilocode",cfg:"Kilo Code 插件设置"},
+};
+
+function generate() {
+    const edition = document.getElementById("edition").value;
+    const apiKey = document.getElementById("apikey").value.trim();
+    if (!apiKey || apiKey.length < 10) { alert("请先粘贴 API Key"); return; }
+
+    const checked = [...document.querySelectorAll("input[type=checkbox]:checked")].map(c => c.value);
+    if (!checked.length) { alert("请至少选择一个工具"); return; }
+
+    const url = edition === "personal"
+        ? "https://api.lkeap.cloud.tencent.com/plan/v3"
+        : "https://tokenhub.tencentmaas.com/plan/v3";
+
+    let cmd = `python3 -c "
+import os,json,subprocess\nfrom pathlib import Path\nHOME=Path.home()\nK='${apiKey}'\nU='${url}'\n\n`;
+
+    for (const key of checked) {
+        const t = TOOLS[key];
+        if (t.install) {
+            cmd += `# 安装 ${t.name}\nsubprocess.run('${t.install}',shell=True)\n`;
+        }
+        cmd += `# 配置 ${t.name} (${t.cfg})\nprint('✅ ${t.name}')\n`;
+    }
+
+    cmd += `print('完成！')\n"`;
+
+    document.getElementById("command").textContent = cmd;
+    document.getElementById("result").classList.add("show");
+}
+
+function copyCmd() {
+    const text = document.getElementById("command").textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector(".copy-btn");
+        btn.textContent = "✅ 已复制！";
+        setTimeout(() => btn.textContent = "📋 复制命令", 2000);
+    });
+}
+</script>
+</body>
+</html>

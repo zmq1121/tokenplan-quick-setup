@@ -295,8 +295,8 @@ def main():
         already = exe and shutil.which(exe)
 
         if not already and tool["type"] == "cli" and tool.get("install"):
-            ok, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
-            if not ok:
+            success, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
+            if not success:
                 failed.append((tool, "安装失败"))
                 warn(f"安装失败，请手动执行: {tool['install']}")
                 print()
@@ -309,8 +309,8 @@ def main():
             print()
             continue
         elif not already and tool["type"] == "plugin" and tool.get("install"):
-            ok, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
-            if not ok:
+            success, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
+            if not success:
                 failed.append((tool, "安装失败"))
                 print()
                 continue

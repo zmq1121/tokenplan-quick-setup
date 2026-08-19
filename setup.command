@@ -326,13 +326,17 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Hermes Agent",
         backend="cli",
         check_exe="hermes",
-        install_cmd=None,
         start_hint="hermes",
         cfg_hint="~/.hermes/.env",
+        install_cmd=(
+            "bash",
+            "-c",
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use --skip-setup",
+        ),
         usage_lines=(
             "终端输入: hermes",
-            "切换模型: 输入 /model → 选择 openai",
-            "模型列表: {base_url}",
+            "切换模型: 输入 /model",
+            "模型列表: 由 Hermes 从当前 custom 端点自动发现",
         ),
     ),
     ToolSpec(
@@ -467,7 +471,7 @@ def should_manual_download(tool: ToolSpec) -> bool:
 
 def supports_auto_install(tool: ToolSpec) -> bool:
     adapter = get_backend_adapter(tool)
-    return bool(adapter.get("auto_install")) and tool.key != "hermes"
+    return bool(adapter.get("auto_install")) and bool(tool.install_cmd)
 
 
 def install_tool(tool: ToolSpec) -> bool:
@@ -637,14 +641,55 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
     write_env(cfg_path(".codex", ".env"), Token_Plan_API_KEY=api_key, OPENAI_BASE_URL=base_url)
 
 
+def patch_hermes_model_routing() -> None:
+    install_dir = Path.home() / ".hermes" / "hermes-agent"
+    target = install_dir / "hermes_cli" / "model_switch.py"
+    if not target.exists():
+        warn("未找到 Hermes 模型切换文件，跳过兼容补丁")
+        return
+    source = target.read_text()
+    old = '            slug = f"custom:{name}"\n            if slug in matches:\n'
+    new = '            slug = custom_provider_slug(name, str(entry.get("provider_key") or ""))\n            if slug in matches:\n'
+    if old in source:
+        backup_file(target)
+        target.write_text(source.replace(old, new, 1))
+    info("Hermes 模型切换兼容已启用")
+
+
 def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    patch_hermes_model_routing()
     write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
     default_model = get_model_catalog(plan.key)["default"]
-    subprocess.run("hermes config set model.base_url " + base_url + "/chat/completions", shell=True)
-    subprocess.run(f"hermes config set model.default openai/{default_model}", shell=True)
-    info("Hermes 已配置完成")
-    info("首次启动时向导会问 Set up a provider now? → 回答 y → 选择 OpenAI")
-    info("之后每次启动直接使用，无需再配置")
+    models = tuple(
+        line.split(":", 1)[1].strip().split(" ", 1)[0]
+        for line in get_model_catalog(plan.key)["display"]
+        if ":" in line
+    )
+    config_path = cfg_path(".hermes", "config.yaml")
+    backup_file(config_path)
+    model_entries = ", ".join(
+        f'"{model}": {{}}' for model in models
+    )
+    config_path.write_text(
+        "model:\n"
+        f"  default: {default_model}\n"
+        "  provider: custom\n"
+        f"  base_url: {base_url}\n"
+        f"  api_key: {api_key}\n"
+        "custom_providers:\n"
+        f"  - name: Token Plan\n"
+        f"    product_line: {plan.display_name}\n"
+        f"    base_url: {base_url}\n"
+        "    api_key: ${OPENAI_API_KEY}\n"
+        f"    model: {default_model}\n"
+        "    discover_models: false\n"
+        "    models_discovered: false\n"
+        f"    models: {{{model_entries}}}\n"
+    )
+    info("Hermes 已配置为 Token Plan custom 端点")
+    info(f"当前产品线: {plan.display_name}")
+    info(f"已写入模型数量: {len(models)}")
+    info(f"默认模型: {default_model}")
 
 
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
@@ -858,13 +903,6 @@ def main() -> None:
         if requires_backend_dependency(tool, "npx") and not shutil.which("npx"):
             failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
             warn("DeepSeek Harness 需要 Node.js / npx")
-            print()
-            continue
-
-        if tool.key == "hermes" and not already_installed:
-            skipped.append(tool)
-            warn("Hermes 需要先手动下载或安装")
-            info("请参考 Hermes 官方安装文档，再运行本脚本完成配置")
             print()
             continue
 

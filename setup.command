@@ -409,7 +409,36 @@ def main():
             print(f"  {name}: 启动命令: {start}")
             print()
     print(f"  API 端点: {base_url}")
+    print(f"  模型参考: {key_url.replace('api-key', '')}"  )
     print()
+    if plan == 'personal-general':
+        print(f"  可用模型 (8个):")
+        print(f"    Auto 智能路由: tc-code-latest")
+        print(f"    DeepSeek-V4-Flash: deepseek-v4-flash-202605")
+        print(f"    DeepSeek-V4-Pro: deepseek-v4-pro-202606")
+        print(f"    MiniMax-M2.7: minimax-m2.7")
+        print(f"    GLM-5: glm-5")
+        print(f"    GLM-5.1: glm-5.1")
+        print(f"    GLM-5.2: glm-5.2")
+        print(f"    Kimi-K2.5: kimi-k2.5 (即将下线)")
+        print()
+    elif plan == 'personal-hy':
+        print(f"  可用模型 (1个):")
+        print(f"    Hy3: hy3")
+        print()
+    elif plan == 'enterprise-pro':
+        print(f"  可用模型 (15个):")
+        print(f"    Auto: auto | GLM-5.3: glm-5.3 | GLM-5.2: glm-5.2")
+        print(f"    GLM-5: glm-5 | GLM-5.1: glm-5.1 | GLM-5-Turbo: glm-5-turbo")
+        print(f"    Kimi K2.7 Code: kimi-k2.7-code | HighSpeed: kimi-k2.7-code-highspeed")
+        print(f"    Kimi-K2.6: kimi-k2.6 | MiniMax-M2.7: minimax-m2.7 | MiniMax-M3: minimax-m3")
+        print(f"    DeepSeek-V4-Flash: deepseek-v4-flash | DeepSeek-V4-Pro: deepseek-v4-pro")
+        print(f"    DeepSeek-V4-Flash 原厂: deepseek-v4-flash-202605 | Pro 原厂: deepseek-v4-pro-202606")
+        print()
+    elif plan == 'enterprise-light':
+        print(f"  可用模型 (1个):")
+        print(f"    Auto 智能路由: auto")
+        print()
 
 if __name__ == "__main__":
     try:

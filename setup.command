@@ -44,18 +44,30 @@ class Spinner:
         else: warn(self.msg + " (失败)")
 
 def run_cmd(cmd, msg):
-    spinner = Spinner(msg)
-    spinner.start()
+    """运行命令，实时输出，不阻塞 UI"""
+    print(f"  {C}→{R} {msg}")
+    print()
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
-        spinner.stop(success=result.returncode == 0)
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        spinner.stop(success=False)
-        return False, "", "超时"
-    except Exception:
-        spinner.stop(success=False)
-        return False, "", "执行失败"
+        # 使用 Popen 实时输出
+        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, universal_newlines=True)
+        lines = []
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                print(f"     {W}{line}{R}")
+                lines.append(line)
+        proc.wait()
+        success = proc.returncode == 0
+        print()
+        if success:
+            ok(f"{msg} — 完成")
+        else:
+            warn(f"{msg} — 失败")
+        return success, "\n".join(lines), ""
+    except Exception as e:
+        warn(f"{msg} — 失败: {e}")
+        return False, "", str(e)
 
 # ── 前置检查 ──────────────────────────────────────────
 def check_prerequisites(tools_needed):

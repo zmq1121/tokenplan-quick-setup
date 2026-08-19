@@ -650,6 +650,8 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
         "\n"
     )
     write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
+    # 同时修复 openai-api provider（Hermes 向导创建的，base_url 可能不完整）
+    subprocess.run("hermes config set model.base_url " + base_url + "/chat/completions", shell=True)
     info("Hermes 已预置为 TokenPlan 自定义端点")
     info("如果首次启动仍显示 provider 列表，请直接选择 custom 这一项")
 

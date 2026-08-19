@@ -128,7 +128,7 @@ TOOLS = {
     "1": {"key":"codebuddy",   "name":"CodeBuddy",          "type":"cli",     "install":"npm install -g @tencent-ai/codebuddy-code",       "check":"codebuddy"},
     "2": {"key":"claude-code", "name":"Claude Code",         "type":"cli",     "install":"npm install -g @anthropic-ai/claude-code",        "check":"claude"},
     "3": {"key":"codex",       "name":"Codex",               "type":"cli",     "install":"npm install -g @openai/codex@0.80.0",             "check":"codex"},
-    "4": {"key":"hermes",      "name":"Hermes Agent",        "type":"cli",     "install":"curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", "check":"hermes"},
+    "4": {"key":"hermes",      "name":"Hermes Agent",        "type":"cli",     "install":"curl -fsSL https://hermes-agent.nousresearch.com/install.sh | HERMES_NO_WIZARD=1 bash", "check":"hermes"},
     "5": {"key":"dsh",         "name":"DeepSeek Harness",    "type":"cli",     "install":None,                                              "check":"npx"},
     "6": {"key":"cursor",      "name":"Cursor",              "type":"desktop", "download":"https://cursor.com/downloads"},
     "7": {"key":"windsurf",    "name":"Windsurf",            "type":"desktop", "download":"https://codeium.com/windsurf/download"},

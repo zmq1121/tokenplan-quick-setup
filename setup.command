@@ -641,11 +641,10 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
     default_model = get_model_catalog(plan.key)["default"]
     subprocess.run("hermes config set model.base_url " + base_url + "/chat/completions", shell=True)
-    subprocess.run("hermes config set model.provider openai", shell=True)
     subprocess.run(f"hermes config set model.default openai/{default_model}", shell=True)
-    # 跳过首次启动向导
-    write_json(cfg_path(".hermes", "state.json"), {"has_completed_onboarding": True}, merge=True)
-    info("Hermes 已配置完成，启动后直接使用")
+    info("Hermes 已配置完成")
+    info("首次启动时向导会问 Set up a provider now? → 回答 y → 选择 OpenAI")
+    info("之后每次启动直接使用，无需再配置")
 
 
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:

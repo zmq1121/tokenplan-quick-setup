@@ -178,10 +178,8 @@ def configure(tool, base_url, api_key, plan):
         p = cfg_path(".dsh", "cordis.patch.yml")
         if not p.exists():
             p.write_text(f"- insert:\n    - id: tokenplan\n      name: '@deepseek-ai/dsh-llm-pi-ai'\n      config:\n        providers:\n          - id: tokenplan\n            name: Tencent Cloud\n            apiKey: \"{api_key}\"\n            baseURL: \"{base_url}\"\n")
-    elif k == "cursor":
-        write_json(cfg_path("Library", "Application Support", "Cursor", "User", "settings.json"), {"openai.customURL":base_url,"openai.customAPIKey":api_key}, merge=True)
-    elif k == "windsurf":
-        write_json(cfg_path("Library", "Application Support", "Windsurf", "User", "settings.json"), {"codeium.apiEndpoint":base_url,"codeium.apiKey":api_key}, merge=True)
+    elif k == "cursor": pass
+    elif k == "windsurf": pass
     elif k == "trae": pass
     elif k in ("cline", "kilo-code"): pass
 

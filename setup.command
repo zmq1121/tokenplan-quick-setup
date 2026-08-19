@@ -156,7 +156,7 @@ def cfg_path(*parts):
     p = HOME.joinpath(*parts)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
-def configure(tool, base_url, api_key):
+def configure(tool, base_url, api_key, plan):
     k = tool["key"]
     if k == "codebuddy":
         write_json(cfg_path(".codebuddy", "models.json"), {"models": [{"id":"auto","name":"Auto","vendor":"Tencent Cloud","apiKey":api_key,"url":base_url}]})
@@ -168,6 +168,9 @@ def configure(tool, base_url, api_key):
         p.write_text(f'model_provider = "TencentCloud"\nmodel = "auto"\n\n[model_providers.TencentCloud]\nname = "TencentCloud"\nbase_url = "{base_url}"\nenv_key = "Token_Plan_API_KEY"\nwire_api = "chat"\n')
     elif k == "hermes":
         write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key, OPENAI_BASE_URL=base_url)
+        # 设置默认模型
+        default_model = {"personal-general":"tc-code-latest","personal-hy":"hy3","enterprise-pro":"auto","enterprise-light":"auto"}.get(plan, "auto")
+        write_json(cfg_path(".hermes", "config.yaml"), {"model":{"default":f"openai/{default_model}","provider":"openai","base_url":base_url}}, merge=True)
     elif k == "dsh":
         p = cfg_path(".dsh", "cordis.patch.yml")
         if not p.exists():
@@ -326,7 +329,7 @@ def main():
             dim("已安装")
 
         try:
-            configure(tool, base_url, api_key)
+            configure(tool, base_url, api_key, plan)
             installed.append(tool)
             ok(f"配置完成")
         except Exception as e:

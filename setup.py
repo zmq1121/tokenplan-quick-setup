@@ -96,10 +96,26 @@ def main():
 
     # 1. 选版本
     print("  📋 你的 Token Plan 版本？")
-    print("     [1] 个人版 (通用/Hy)")
-    print("     [2] 企业版 (专业/轻享)")
-    edition = "personal" if ask("  > ") == "1" else "enterprise"
-    base_url = "https://api.lkeap.cloud.tencent.com/plan/v3" if edition == "personal" else "https://tokenhub.tencentmaas.com/plan/v3"
+    print("     [1] 个人版 - 通用")
+    print("     [2] 个人版 - Hy（混元）")
+    print("     [3] 企业版 - 专业套餐")
+    print("     [4] 企业版 - 轻享套餐")
+    choice = ask("  > ")
+    plans = {"1":"personal-general","2":"personal-hy","3":"enterprise-pro","4":"enterprise-light"}
+    plan = plans.get(choice, "personal-general")
+
+    if plan.startswith("personal"):
+        base_url = "https://api.lkeap.cloud.tencent.com/plan/v3"
+        anthropic_url = "https://api.lkeap.cloud.tencent.com/plan/anthropic"
+    else:
+        base_url = "https://tokenhub.tencentmaas.com/plan/v3"
+        anthropic_url = "https://tokenhub.tencentmaas.com/plan/anthropic"
+
+    print(f"     端点: {base_url}")
+    if plan == "enterprise-light":
+        print(f"     ⚠️  轻享套餐仅支持 Auto 模型")
+    elif plan == "personal-hy":
+        print(f"     ⚠️  Hy 套餐仅支持 Hy3 模型")
     print()
 
     # 2. 输 Key

@@ -3,7 +3,7 @@
 # -*- coding: utf-8 -*-
 # 腾讯云 Token Plan — 小白一键接入
 # Mac: 双击此文件 | Windows: 右键→Python 打开
-import os, sys, json, shutil, subprocess, time, threading, urllib.request
+import os, sys, json, shutil, subprocess, time, threading, urllib.request, urllib.error
 from pathlib import Path
 from datetime import datetime
 
@@ -180,21 +180,29 @@ def configure(tool, base_url, api_key):
     elif k in ("cline", "kilo-code"): pass
 
 # ── 验证 API Key ────────────────────────────────────
-def verify_api_key(base_url, api_key):
+def verify_api_key(base_url, api_key, plan):
+    """验证 API Key — 使用正确的默认模型"""
+    default_model = {"personal-general":"tc-code-latest","personal-hy":"hy3","enterprise-pro":"auto","enterprise-light":"auto"}.get(plan, "auto")
     spinner = Spinner("验证 API Key...")
     spinner.start()
     try:
         req = urllib.request.Request(
             f"{base_url}/chat/completions",
-            data=json.dumps({"model":"auto","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}).encode(),
+            data=json.dumps({"model":default_model,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}).encode(),
             headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
             method="POST"
         )
         resp = urllib.request.urlopen(req, timeout=10)
         spinner.stop(success=True)
         return True
+    except urllib.error.HTTPError as e:
+        spinner.stop(success=False)
+        body = e.read().decode()[:200] if e.fp else ""
+        warn(f"API 返回错误 [{e.code}]: {body}")
+        return False
     except Exception as e:
         spinner.stop(success=False)
+        warn(f"连接失败: {e}")
         return False
 
 # ── 主流程 ──────────────────────────────────────────
@@ -249,7 +257,7 @@ def main():
     print()
 
     # 验证 Key
-    if not verify_api_key(base_url, api_key):
+    if not verify_api_key(base_url, api_key, plan):
         warn("API Key 验证失败，请检查 Key 是否正确")
         print()
         if ask("  是否继续？(y/n): ").lower() != "y":

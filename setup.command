@@ -168,9 +168,10 @@ def configure(tool, base_url, api_key, plan):
         p.write_text(f'model_provider = "TencentCloud"\nmodel = "auto"\n\n[model_providers.TencentCloud]\nname = "TencentCloud"\nbase_url = "{base_url}"\nenv_key = "Token_Plan_API_KEY"\nwire_api = "chat"\n')
     elif k == "hermes":
         write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key, OPENAI_BASE_URL=base_url)
-        # 设置默认模型
+        # 设置默认模型（用 hermes config set 命令）
         default_model = {"personal-general":"tc-code-latest","personal-hy":"hy3","enterprise-pro":"auto","enterprise-light":"auto"}.get(plan, "auto")
-        write_json(cfg_path(".hermes", "config.yaml"), {"model":{"default":f"openai/{default_model}","provider":"openai","base_url":base_url}}, merge=True)
+        subprocess.run(f"hermes config set model.default openai/{default_model}", shell=True, capture_output=True)
+        subprocess.run(f"hermes config set model.provider openai", shell=True, capture_output=True)
     elif k == "dsh":
         p = cfg_path(".dsh", "cordis.patch.yml")
         if not p.exists():

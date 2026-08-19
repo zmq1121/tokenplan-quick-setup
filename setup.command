@@ -4,6 +4,7 @@
 # 腾讯云 Token Plan — 小白一键接入
 # Mac: 双击此文件 | Windows: 右键→Python 打开
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -293,13 +294,18 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
 TOOLS: Tuple[ToolSpec, ...] = (
     ToolSpec(
         key="codebuddy",
-        name="CodeBuddy",
+        name="CodeBuddy Code",
         backend="cli",
         check_exe="codebuddy",
         install_cmd=("npm", "install", "-g", "@tencent-ai/codebuddy-code"),
         start_hint="codebuddy",
         cfg_hint="~/.codebuddy/models.json",
-        usage_lines=("终端输入: codebuddy", "输入 /model 切换模型"),
+        usage_lines=(
+            "终端输入: codebuddy",
+            "Token Plan 使用 API Key，无需腾讯账号网页登录",
+            "如果新窗口提示 command not found，请先执行: source ~/.zshrc",
+            "输入 /model 切换模型",
+        ),
     ),
     ToolSpec(
         key="claude-code",
@@ -309,14 +315,20 @@ TOOLS: Tuple[ToolSpec, ...] = (
         install_cmd=("npm", "install", "-g", "@anthropic-ai/claude-code"),
         start_hint="claude",
         cfg_hint="~/.claude/settings.json",
-        usage_lines=("终端输入: claude", "模型已配置，可直接使用"),
+        usage_lines=(
+            "终端输入: claude",
+            "切换模型: claude --model <模型ID>",
+            "完整模型选择器: claude-tokenplan",
+            "Claude 内置 /model 只显示固定槽位，不是 Token Plan 完整目录",
+            "也可直接运行: claude --model <模型ID>",
+        ),
     ),
     ToolSpec(
         key="codex",
         name="Codex",
         backend="cli",
         check_exe="codex",
-        install_cmd=("npm", "install", "-g", "@openai/codex@0.80.0"),
+        install_cmd=("npm", "install", "-g", "@openai/codex@latest"),
         start_hint="codex",
         cfg_hint="~/.codex/config.toml",
         usage_lines=("终端输入: codex", "模型已配置，可直接使用"),
@@ -454,6 +466,77 @@ def get_backend_adapter(tool: ToolSpec) -> Dict[str, object]:
     })
 
 
+def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
+    """Provide CodeBuddy Code's documented API-key authentication path."""
+    env_path = cfg_path(".codebuddy", "tokenplan.env")
+    env_path.write_text(
+        f"export CODEBUDDY_API_KEY={json.dumps(api_key)}\n"
+        f"export OPENAI_API_KEY={json.dumps(api_key)}\n"
+        f"export OPENAI_BASE_URL={json.dumps(base_url)}\n"
+    )
+    shell = os.environ.get("SHELL", "")
+    rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
+    marker = "# Token Plan CodeBuddy Code API-key authentication"
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    source_line = f'[ -f "{env_path}" ] && source "{env_path}"'
+    if marker not in existing:
+        rc_path.parent.mkdir(parents=True, exist_ok=True)
+        rc_path.write_text(existing.rstrip() + f"\n{marker}\n{source_line}\n")
+    os.environ["CODEBUDDY_API_KEY"] = api_key
+    os.environ["OPENAI_API_KEY"] = api_key
+    os.environ["OPENAI_BASE_URL"] = base_url
+
+
+def install_claude_tokenplan_path() -> None:
+    """Expose the full Token Plan model selector in future shells."""
+    launcher_dir = cfg_path(".local", "bin")
+    launcher_dir.mkdir(parents=True, exist_ok=True)
+    shell = os.environ.get("SHELL", "")
+    rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
+    marker = "# Token Plan Claude model selector"
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    path_line = f'export PATH="{launcher_dir}:$PATH"'
+    if marker not in existing:
+        rc_path.parent.mkdir(parents=True, exist_ok=True)
+        rc_path.write_text(existing.rstrip() + f"\\n{marker}\\n{path_line}\\n")
+    current_path = os.environ.get("PATH", "")
+    if str(launcher_dir) not in current_path.split(":"):
+        os.environ["PATH"] = f"{launcher_dir}:{current_path}"
+
+
+def ensure_npm_bin_on_path() -> None:
+    """Make globally installed npm CLI commands available in future shells."""
+    npm = shutil.which("npm")
+    if not npm:
+        return
+    try:
+        prefix = subprocess.check_output(
+            [npm, "config", "get", "prefix"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return
+    if not prefix or prefix in {"null", "undefined"}:
+        return
+    npm_bin = Path(prefix) / "bin"
+    if not npm_bin.is_dir():
+        return
+
+    path_value = str(npm_bin)
+    current_path = os.environ.get("PATH", "")
+    if path_value not in current_path.split(":"):
+        os.environ["PATH"] = f"{path_value}:{current_path}"
+
+    shell = os.environ.get("SHELL", "")
+    rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
+    marker = "# Token Plan npm global CLI path"
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    if marker not in existing:
+        rc_path.parent.mkdir(parents=True, exist_ok=True)
+        block = f'\n{marker}\nexport PATH="{npm_bin}:$PATH"\n'
+        rc_path.write_text(existing.rstrip() + block)
+    info(f"npm 全局命令路径已加入: {npm_bin}")
+
+
 def is_tool_installed(tool: ToolSpec) -> bool:
     return bool(tool.check_exe and shutil.which(tool.check_exe))
 
@@ -482,7 +565,12 @@ def install_tool(tool: ToolSpec) -> bool:
     if requires_backend_dependency(tool, "code") and not shutil.which("code"):
         warn("未找到 code 命令，无法自动安装 VS Code 插件")
         return False
-    return run_command(tool.install_cmd, f"正在安装 {tool.name}...")
+    command = tool.install_cmd
+    if isinstance(command, tuple) and command and command[0] == "npm":
+        npm_cache = cfg_path(".tokenplan-npm-cache")
+        npm_cache.mkdir(parents=True, exist_ok=True)
+        command = (*command, "--cache", str(npm_cache))
+    return run_command(command, f"正在安装 {tool.name}...")
 
 
 def render_usage_lines(tool: ToolSpec, base_url: str, api_key: str) -> List[str]:
@@ -564,6 +652,19 @@ def get_model_catalog(plan_key: str) -> Dict[str, object]:
     return MODEL_CATALOG.get(plan_key, {"default": "auto", "display": ()})
 
 
+def get_model_ids(plan_key: str) -> List[str]:
+    """Return the canonical model IDs shared by every tool adapter."""
+    catalog = get_model_catalog(plan_key)
+    result: List[str] = []
+    for line in catalog.get("display", ()):
+        if ":" not in line:
+            continue
+        model_id = line.split(":", 1)[1].strip().split(" ", 1)[0]
+        if model_id and model_id not in result:
+            result.append(model_id)
+    return result
+
+
 def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
     spinner = Spinner("验证 API Key...")
     spinner.start()
@@ -595,35 +696,86 @@ def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
 
 
 def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    model_ids = get_model_ids(plan.key)
+    default_model = str(get_model_catalog(plan.key)["default"])
     write_json(
         cfg_path(".codebuddy", "models.json"),
         {
             "models": [
                 {
-                    "id": "auto",
-                    "name": "Auto",
+                    "id": model_id,
+                    "name": model_id,
                     "vendor": "Tencent Cloud",
                     "apiKey": api_key,
                     "url": base_url,
                 }
+                for model_id in model_ids
             ]
         },
     )
+    write_json(
+        cfg_path(".codebuddy", "settings.json"),
+        {
+            "env": {
+                "CODEBUDDY_API_KEY": api_key,
+                "OPENAI_API_KEY": api_key,
+                "OPENAI_BASE_URL": base_url,
+            },
+            "model": default_model,
+        },
+        merge=True,
+    )
+    install_codebuddy_shell_env(api_key, base_url)
 
 
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
+    catalog = get_model_catalog(plan.key)
+    default_model = str(catalog["default"])
+    model_ids = get_model_ids(plan.key)
     write_json(
         cfg_path(".claude", "settings.json"),
         {
             "env": {
                 "ANTHROPIC_AUTH_TOKEN": api_key,
                 "ANTHROPIC_BASE_URL": anthropic_url,
-                "ANTHROPIC_MODEL": get_model_catalog(plan.key)["default"],
-            }
+                "ANTHROPIC_MODEL": default_model,
+            },
+            "model": default_model,
+            "tokenplan": {
+                "provider": "anthropic",
+                "base_url": anthropic_url,
+                "models": model_ids,
+            },
         },
         merge=True,
     )
+    write_json(
+        cfg_path(".claude", "tokenplan-models.json"),
+        {
+            "provider": "anthropic",
+            "base_url": anthropic_url,
+            "models": model_ids,
+            "default": default_model,
+        },
+    )
+    launcher = cfg_path(".local", "bin", "claude-tokenplan")
+    launcher.write_text(
+        "#!/bin/sh\n"
+        f"models={' '.join(model_ids)!r}\n"
+        "printf 'Token Plan 模型列表:\\n'\n"
+        "i=1; for model in $models; do printf '  %s. %s\\n' \"$i\" \"$model\"; i=$((i + 1)); done\n"
+        "printf '请选择序号或输入完整模型 ID: '\n"
+        "read -r choice\n"
+        "case $choice in\n"
+        "  ''|*[!0-9]*) model=$choice ;;\n"
+        "  *) model=$(printf '%s\\n' $models | sed -n \"${choice}p\") ;;\n"
+        "esac\n"
+        "[ -n \"$model\" ] || { printf '无效选择\\n' >&2; exit 1; }\n"
+        "exec claude --model \"$model\" \"$@\"\n"
+    )
+    launcher.chmod(0o755)
+    install_claude_tokenplan_path()
 
 
 def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
@@ -660,11 +812,7 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     patch_hermes_model_routing()
     write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
     default_model = get_model_catalog(plan.key)["default"]
-    models = tuple(
-        line.split(":", 1)[1].strip().split(" ", 1)[0]
-        for line in get_model_catalog(plan.key)["display"]
-        if ":" in line
-    )
+    models = tuple(get_model_ids(plan.key))
     config_path = cfg_path(".hermes", "config.yaml")
     backup_file(config_path)
     model_entries = ", ".join(
@@ -876,6 +1024,7 @@ def main() -> None:
     total = len(selected_tools)
     bar_len = 20
 
+    ensure_npm_bin_on_path()
     for index, tool in enumerate(selected_tools, start=1):
         filled = int((index / total) * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
@@ -906,7 +1055,13 @@ def main() -> None:
             print()
             continue
 
-        if not already_installed and supports_auto_install(tool):
+        if tool.key == "codex" and supports_auto_install(tool) and already_installed:
+            dim("正在检查并更新 Codex，避免旧版 macOS 签名或架构问题")
+            if not install_tool(tool):
+                failed.append((tool, "更新失败"))
+                print()
+                continue
+        elif not already_installed and supports_auto_install(tool):
             if repair_mode:
                 skipped.append(tool)
                 warn(f"{tool.name} 未检测到已安装状态，修复模式已跳过安装")

@@ -125,16 +125,16 @@ def backup_file(path):
 
 # ── 工具定义 ──────────────────────────────────────────
 TOOLS = {
-    "1": {"key":"codebuddy",   "name":"CodeBuddy",          "type":"cli",     "install":"npm install -g @tencent-ai/codebuddy-code",       "check":"codebuddy"},
-    "2": {"key":"claude-code", "name":"Claude Code",         "type":"cli",     "install":"npm install -g @anthropic-ai/claude-code",        "check":"claude"},
-    "3": {"key":"codex",       "name":"Codex",               "type":"cli",     "install":"npm install -g @openai/codex@0.80.0",             "check":"codex"},
-    "4": {"key":"hermes",      "name":"Hermes Agent",        "type":"cli",     "install":"curl -fsSL https://hermes-agent.nousresearch.com/install.sh | HERMES_NO_WIZARD=1 bash", "check":"hermes"},
-    "5": {"key":"dsh",         "name":"DeepSeek Harness",    "type":"cli",     "install":None,                                              "check":"npx"},
-    "6": {"key":"cursor",      "name":"Cursor",              "type":"desktop", "download":"https://cursor.com/downloads"},
-    "7": {"key":"windsurf",    "name":"Windsurf",            "type":"desktop", "download":"https://codeium.com/windsurf/download"},
-    "8": {"key":"trae",        "name":"TRAE",                "type":"desktop", "download":"https://www.trae.ai/download"},
-    "9": {"key":"cline",       "name":"Cline (VS Code 插件)", "type":"plugin",  "install":"code --install-extension saoudrizwan.claude-dev"},
-    "10":{"key":"kilo-code",   "name":"Kilo Code",           "type":"plugin",  "install":"code --install-extension kilocode.kilocode"},
+    "1": {"key":"codebuddy",   "name":"CodeBuddy",          "type":"cli",     "install":"npm install -g @tencent-ai/codebuddy-code",       "check":"codebuddy", "start":"codebuddy", "cfg":"~/.codebuddy/models.json"},
+    "2": {"key":"claude-code", "name":"Claude Code",         "type":"cli",     "install":"npm install -g @anthropic-ai/claude-code",        "check":"claude", "start":"claude", "cfg":"~/.claude/settings.json"},
+    "3": {"key":"codex",       "name":"Codex",               "type":"cli",     "install":"npm install -g @openai/codex@0.80.0",             "check":"codex", "start":"codex", "cfg":"~/.codex/config.toml"},
+    "4": {"key":"hermes",      "name":"Hermes Agent",        "type":"cli",     "install":"curl -fsSL https://hermes-agent.nousresearch.com/install.sh | HERMES_NO_WIZARD=1 bash", "check":"hermes", "start":"hermes", "cfg":"~/.hermes/.env"},
+    "5": {"key":"dsh",         "name":"DeepSeek Harness",    "type":"cli",     "install":None,                                              "check":"npx", "start":"npx @deepseek-ai/dsh web", "cfg":"~/.dsh/cordis.patch.yml"},
+    "6": {"key":"cursor",      "name":"Cursor",              "type":"desktop", "download":"https://cursor.com/downloads", "start":"cursor", "cfg":"Cursor 设置文件"},
+    "7": {"key":"windsurf",    "name":"Windsurf",            "type":"desktop", "download":"https://codeium.com/windsurf/download", "start":"windsurf", "cfg":"Windsurf 设置文件"},
+    "8": {"key":"trae",        "name":"TRAE",                "type":"desktop", "download":"https://www.trae.ai/download", "start":"TRAE.app", "cfg":"TRAE 设置"},
+    "9": {"key":"cline",       "name":"Cline (VS Code 插件)", "type":"plugin",  "install":"code --install-extension saoudrizwan.claude-dev", "start":"VS Code → Cline", "cfg":"Cline 插件设置"},
+    "10":{"key":"kilo-code",   "name":"Kilo Code",           "type":"plugin",  "install":"code --install-extension kilocode.kilocode", "start":"VS Code → Kilo Code", "cfg":"Kilo Code 插件设置"},
 }
 
 # ── 配置写入 ──────────────────────────────────────────
@@ -350,7 +350,11 @@ def main():
     if installed:
         print(f"  {G}✅ 已配置 {len(installed)} 个工具:{R}")
         for t in installed:
+            start = t.get('start', '')
+            cfg = t.get('cfg', '')
             print(f"       {t['name']}")
+            if start: print(f"         启动: {start}")
+            if cfg: print(f"         配置: {cfg}")
     if skipped:
         print(f"  {Y}📝 需手动下载 {len(skipped)} 个工具:{R}")
         for t, reason in skipped:

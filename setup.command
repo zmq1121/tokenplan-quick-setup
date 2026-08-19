@@ -3,8 +3,10 @@
 # -*- coding: utf-8 -*-
 # 腾讯云 Token Plan — 小白一键接入
 # Mac: 双击此文件 | Windows: 右键→Python 打开
-import os, sys, json, shutil, subprocess, time, threading
+import os, sys, json, shutil, subprocess, time, threading, urllib.request
 from pathlib import Path
+from datetime import datetime
+
 HOME = Path.home()
 G,Y,B,R,C,M,W = "\033[32m","\033[33m","\033[36m","\033[0m","\033[35m","\033[35m","\033[37m"
 def clear(): print("\033[2J\033[H", end="")
@@ -41,19 +43,73 @@ class Spinner:
         if success: ok(self.msg)
         else: warn(self.msg + " (失败)")
 
-def run_with_spinner(cmd, msg):
+def run_cmd(cmd, msg):
     spinner = Spinner(msg)
     spinner.start()
     try:
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
         spinner.stop(success=result.returncode == 0)
-        return result.returncode == 0
+        return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
         spinner.stop(success=False)
-        return False
+        return False, "", "超时"
     except Exception:
         spinner.stop(success=False)
-        return False
+        return False, "", "执行失败"
+
+# ── 前置检查 ──────────────────────────────────────────
+def check_prerequisites(tools_needed):
+    print("  ── 前置检查 ──")
+    print()
+    results = {}
+
+    # Python
+    results["python"] = True
+    ok("Python 3")
+
+    # Node.js + npm
+    needs_node = any(t["type"] == "cli" and t.get("install","").startswith("npm") for t in tools_needed)
+    if needs_node:
+        if shutil.which("node"):
+            ok("Node.js")
+            results["node"] = True
+        else:
+            warn("未安装 Node.js，CLI 工具安装会失败")
+            info("安装: https://nodejs.org")
+            results["node"] = False
+        if shutil.which("npm"):
+            ok("npm")
+            results["npm"] = True
+        else:
+            results["npm"] = False
+
+    # curl
+    needs_curl = any("curl" in (t.get("install") or "") for t in tools_needed)
+    if needs_curl:
+        if shutil.which("curl"):
+            ok("curl")
+            results["curl"] = True
+        else:
+            warn("未安装 curl")
+            results["curl"] = False
+
+    # Git (for some tools)
+    if shutil.which("git"):
+        ok("git")
+
+    print()
+    return results
+
+# ── 备份 ────────────────────────────────────────────
+BACKUP_DIR = HOME / ".tokenplan-backups"
+def backup_file(path):
+    if not path.exists():
+        return None
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = BACKUP_DIR / f"{path.name}.{ts}.bak"
+    shutil.copy2(path, backup)
+    return backup
 
 # ── 工具定义 ──────────────────────────────────────────
 TOOLS = {
@@ -71,12 +127,14 @@ TOOLS = {
 
 # ── 配置写入 ──────────────────────────────────────────
 def write_json(path, data, merge=False):
+    backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if merge and path.exists():
         d = json.loads(path.read_text())
         if isinstance(d, dict): d.update(data); data = d
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 def write_env(path, **kv):
+    backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     old = path.read_text().split("\n") if path.exists() else []
     lines = [l for l in old if not any(l.startswith(f"{k}=") for k in kv)]
@@ -93,7 +151,9 @@ def configure(tool, base_url, api_key):
     elif k == "claude-code":
         write_json(cfg_path(".claude", "settings.json"), {"env":{"ANTHROPIC_AUTH_TOKEN":api_key,"ANTHROPIC_BASE_URL":base_url,"ANTHROPIC_MODEL":"auto"}}, merge=True)
     elif k == "codex":
-        cfg_path(".codex", "config.toml").write_text(f'model_provider = "TencentCloud"\nmodel = "auto"\n\n[model_providers.TencentCloud]\nname = "TencentCloud"\nbase_url = "{base_url}"\nenv_key = "Token_Plan_API_KEY"\nwire_api = "chat"\n')
+        p = cfg_path(".codex", "config.toml")
+        backup_file(p)
+        p.write_text(f'model_provider = "TencentCloud"\nmodel = "auto"\n\n[model_providers.TencentCloud]\nname = "TencentCloud"\nbase_url = "{base_url}"\nenv_key = "Token_Plan_API_KEY"\nwire_api = "chat"\n')
     elif k == "hermes":
         write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key, OPENAI_BASE_URL=base_url)
     elif k == "dsh":
@@ -107,6 +167,24 @@ def configure(tool, base_url, api_key):
     elif k == "trae": pass
     elif k in ("cline", "kilo-code"): pass
 
+# ── 验证 API Key ────────────────────────────────────
+def verify_api_key(base_url, api_key):
+    spinner = Spinner("验证 API Key...")
+    spinner.start()
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps({"model":"auto","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}).encode(),
+            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
+            method="POST"
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        spinner.stop(success=True)
+        return True
+    except Exception as e:
+        spinner.stop(success=False)
+        return False
+
 # ── 主流程 ──────────────────────────────────────────
 def main():
     clear()
@@ -116,7 +194,12 @@ def main():
     print("  ║   只需 API Key，其余全自动                  ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
+    print("  三步完成：选套餐 → 输 Key → 选工具")
+    print()
+
+    # 1. 选套餐
     print("  ── 第一步：选择套餐 ──")
+    print()
     print("     [1] 个人版 - 通用")
     print("     [2] 个人版 - Hy（混元）")
     print("     [3] 企业版 - 专业套餐")
@@ -136,12 +219,15 @@ def main():
     else:
         key_url = "https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key"
     print()
-    info(f"套餐: {['个人版-通用','个人版-Hy','企业版-专业','企业版-轻享'][int(choice)-1]}")
+    plan_names = ["个人版-通用","个人版-Hy","企业版-专业","企业版-轻享"]
+    ok(f"已选择: {plan_names[int(choice)-1]}")
     if plan in ("enterprise-light", "personal-hy"):
         warn(f"该套餐仅支持 {'Auto' if plan == 'enterprise-light' else 'Hy3'} 模型")
     print()
 
+    # 2. 输 Key
     print("  ── 第二步：输入 API Key ──")
+    print()
     info(f"获取地址: {key_url}")
     print()
     api_key = ask("  请粘贴 API Key: ")
@@ -149,10 +235,20 @@ def main():
         print(f"\n  {Y}❌ API Key 无效，请重新运行。{R}")
         return
     print()
-    ok(f"API Key 已确认 ({api_key[:8]}...)")
+
+    # 验证 Key
+    if not verify_api_key(base_url, api_key):
+        warn("API Key 验证失败，请检查 Key 是否正确")
+        print()
+        if ask("  是否继续？(y/n): ").lower() != "y":
+            return
+    else:
+        ok("API Key 验证通过 ✓")
     print()
 
+    # 3. 选工具
     print("  ── 第三步：选择工具 ──")
+    print()
     print("  输入编号选择，空格分隔，直接回车 = 全部")
     print()
     for num, t in TOOLS.items():
@@ -163,18 +259,23 @@ def main():
     selected = [TOOLS[c] for c in choices if c in TOOLS] if choices else list(TOOLS.values())
     print()
 
-    # 进度摘要
+    # 前置检查
+    check_prerequisites(selected)
+
+    # 进度条
     total = len(selected)
-    print(f"  ── 开始配置 {total} 个工具 ──")
+    print(f"  ── 正在配置 {total} 个工具 ──")
     print()
 
-    installed = 0
+    installed = []
+    failed = []
+    skipped = []
+
     for i, tool in enumerate(selected):
-        # 进度条
         bar_len = 20
-        filled = int((i / total) * bar_len)
+        filled = int(((i+1) / total) * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
-        print(f"  [{bar}] {i}/{total}")
+        print(f"  [{bar}] {i+1}/{total}")
         print(f"  📦 {tool['name']}")
         print()
 
@@ -182,40 +283,71 @@ def main():
         already = exe and shutil.which(exe)
 
         if not already and tool["type"] == "cli" and tool.get("install"):
-            run_with_spinner(tool["install"], f"正在安装 {tool['name']}...")
+            ok, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
+            if not ok:
+                failed.append((tool, "安装失败"))
+                warn(f"安装失败，请手动执行: {tool['install']}")
+                print()
+                continue
         elif not already and tool["type"] == "desktop":
+            skipped.append((tool, "需先下载"))
             warn(f"请先下载 {tool['name']}")
-            info(f"下载地址: {tool.get('download', '')}")
-            info("下载安装后重新运行本工具即可自动配置")
+            info(f"下载: {tool.get('download', '')}")
+            info("下载安装后重新运行即可自动配置")
             print()
             continue
         elif not already and tool["type"] == "plugin" and tool.get("install"):
-            run_with_spinner(tool["install"], f"正在安装 {tool['name']}...")
+            ok, out, err = run_cmd(tool["install"], f"正在安装 {tool['name']}...")
+            if not ok:
+                failed.append((tool, "安装失败"))
+                print()
+                continue
         else:
-            ok("已安装")
+            dim("已安装")
 
         try:
             configure(tool, base_url, api_key)
-            installed += 1
+            installed.append(tool)
             ok(f"配置完成")
         except Exception as e:
+            failed.append((tool, str(e)))
             warn(f"配置失败: {e}")
 
         if tool["type"] == "desktop":
-            info(f"打开 {tool['name']} → 设置 → 模型，确认已填入:")
+            info(f"打开 {tool['name']} → 设置 → 模型")
             info(f"  Base URL: {base_url}")
             info(f"  API Key:  {api_key[:8]}...")
         print()
 
-    # 完成
+    # 最终汇总
     bar = "█" * bar_len
     print(f"  [{bar}] {total}/{total}")
     print()
     print("  ╔══════════════════════════════════════════════╗")
-    print(f"  ║  ✅ 完成！{installed}/{total} 个工具已配置       ║")
+    print(f"  ║           配 置 完 成                       ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
-    print("  打开你的工具，选择 Token Plan 模型即可开始使用。")
+    if installed:
+        print(f"  {G}✅ 已配置 {len(installed)} 个工具:{R}")
+        for t in installed:
+            print(f"       {t['name']}")
+    if skipped:
+        print(f"  {Y}📝 需手动下载 {len(skipped)} 个工具:{R}")
+        for t, reason in skipped:
+            print(f"       {t['name']} — {t.get('download','')}")
+    if failed:
+        print(f"  {Y}❌ 失败 {len(failed)} 个工具:{R}")
+        for t, reason in failed:
+            print(f"       {t['name']} — {reason}")
+    if BACKUP_DIR.exists():
+        backups = list(BACKUP_DIR.glob("*.bak"))
+        if backups:
+            print(f"  {W}💾 原有配置已备份到: {BACKUP_DIR}{R}")
+    print()
+    print("  ── 下一步 ──")
+    print()
+    print("  打开你配置的工具，选择 Token Plan 模型即可开始使用。")
+    print(f"  API 端点: {base_url}")
     print()
 
 if __name__ == "__main__":

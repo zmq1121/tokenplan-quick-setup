@@ -639,21 +639,12 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     hermes_dir = cfg_path(".hermes")
-    config_path = hermes_dir / "config.yaml"
-    backup_file(config_path)
-    default_model = get_model_catalog(plan.key)["default"]
-    config_path.write_text(
-        "model:\n"
-        "  provider: openai\n"
-        f"  default: {default_model}\n"
-        f"  base_url: {base_url}/chat/completions\n"
-        "\n"
-    )
     write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
-    # 同时修复 openai-api provider（Hermes 向导创建的，base_url 可能不完整）
+    # 使用 hermes config set 设置，避免被向导覆盖
     subprocess.run("hermes config set model.base_url " + base_url + "/chat/completions", shell=True)
-    info("Hermes 已预置为 TokenPlan 自定义端点")
-    info("如果首次启动仍显示 provider 列表，请直接选择 custom 这一项")
+    # 首次启动会弹出 provider 向导，选择 "Tencent TokenHub" 即可
+    info("Hermes 配置已写入")
+    info("首次启动如弹出 provider 向导，请选择 Tencent TokenHub")
 
 
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:

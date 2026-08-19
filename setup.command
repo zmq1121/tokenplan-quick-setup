@@ -172,6 +172,7 @@ def configure(tool, base_url, api_key, plan):
         default_model = {"personal-general":"tc-code-latest","personal-hy":"hy3","enterprise-pro":"auto","enterprise-light":"auto"}.get(plan, "auto")
         subprocess.run(f"hermes config set model.default openai/{default_model}", shell=True)
         subprocess.run(f"hermes config set model.provider openai", shell=True)
+        info("提示: 选 openai 是因为 Token Plan 兼容 OpenAI 协议，实际请求发到腾讯云")
     elif k == "dsh":
         p = cfg_path(".dsh", "cordis.patch.yml")
         if not p.exists():
@@ -380,7 +381,7 @@ def main():
         if name == 'Hermes Agent':
             print(f"  {name}:")
             print(f"    终端输入: hermes"  )
-            print(f"    切换模型: 输入 /model → 选择 openai")
+            print(f"    切换模型: 输入 /model → 选择 openai（Token Plan 兼容 OpenAI 协议，非 OpenAI 账号）")
             print(f"    模型列表: {base_url.replace('/plan/v3','')}"  )
             print()
         elif name == 'Claude Code':

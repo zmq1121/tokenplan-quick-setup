@@ -111,6 +111,15 @@ def main():
         base_url = "https://tokenhub.tencentmaas.com/plan/v3"
         anthropic_url = "https://tokenhub.tencentmaas.com/plan/anthropic"
 
+    if plan == "personal-general":
+        key_url = "https://console.cloud.tencent.com/tokenhub/tokenplan/common/api-key"
+    elif plan == "personal-hy":
+        key_url = "https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key"
+    elif plan == "enterprise-pro":
+        key_url = "https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key"
+    else:
+        key_url = "https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key"
+
     print(f"     端点: {base_url}")
     if plan == "enterprise-light":
         print(f"     ⚠️  轻享套餐仅支持 Auto 模型")
@@ -120,7 +129,7 @@ def main():
 
     # 2. 输 Key
     print("  🔑 请输入 API Key")
-    print("     (获取: https://console.cloud.tencent.com/tokenhub/api-key)")
+    print(f"     (获取: {key_url})")
     api_key = ask("  > ")
     if len(api_key) < 10:
         print("  ❌ Key 无效"); return

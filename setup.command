@@ -644,7 +644,7 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     default_model = get_model_catalog(plan.key)["default"]
     config_path.write_text(
         "model:\n"
-        "  provider: custom\n"
+        "  provider: openai\n"
         f"  default: {default_model}\n"
         f"  base_url: {base_url}/chat/completions\n"
         "\n"

@@ -372,9 +372,41 @@ def main():
         if backups:
             print(f"  {W}💾 原有配置已备份到: {BACKUP_DIR}{R}")
     print()
-    print("  ── 下一步 ──")
+    print("  ── 如何使用 ──")
     print()
-    print("  打开你配置的工具，选择 Token Plan 模型即可开始使用。")
+    for t in installed:
+        name = t['name']
+        start = t.get('start', '')
+        if name == 'Hermes Agent':
+            print(f"  {name}:")
+            print(f"    终端输入: hermes"  )
+            print(f"    切换模型: 输入 /model → 选择 openai")
+            print(f"    模型列表: {base_url.replace('/plan/v3','')}"  )
+            print()
+        elif name == 'Claude Code':
+            print(f"  {name}:")
+            print(f"    终端输入: claude"  )
+            print(f"    模型已配置，直接使用")
+            print()
+        elif name == 'CodeBuddy':
+            print(f"  {name}:")
+            print(f"    终端输入: codebuddy"  )
+            print(f"    输入 /model 切换模型")
+            print()
+        elif name == 'Codex':
+            print(f"  {name}:")
+            print(f"    终端输入: codex"  )
+            print(f"    模型已配置，直接使用")
+            print()
+        elif name == 'DeepSeek Harness':
+            print(f"  {name}:")
+            print(f"    终端输入: npx @deepseek-ai/dsh web"  )
+            print(f"    浏览器打开 http://127.0.0.1:3080")
+            print(f"    设置 → 模型 → 添加自定义提供方")
+            print()
+        elif start:
+            print(f"  {name}: 启动命令: {start}")
+            print()
     print(f"  API 端点: {base_url}")
     print()
 

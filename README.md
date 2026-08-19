@@ -1,30 +1,41 @@
-# 腾讯云 Token Plan — 小白一键接入
+# 腾讯云 Token Plan 一键接入
 
-> 只需 API Key。打开终端，粘贴一行命令，自动安装 + 配置所有 AI 工具。
+> 只需三步，不用懂任何技术。
 
-## 使用方法
+---
 
-打开终端，粘贴：
+## 第一步：获取 API Key
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/zmq1121/tokenplan-quick-setup/main/install.sh | bash
-```
+点击你的套餐对应链接，复制 Key：
 
-按提示：选版本 → 输 API Key → 勾选工具 → 完成。
+| 套餐 | 获取 Key |
+|------|---------|
+| 个人版-通用 | https://console.cloud.tencent.com/tokenhub/tokenplan/common/api-key |
+| 个人版-Hy | https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key |
+| 企业版-专业 | https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key |
+| 企业版-轻享 | https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key |
 
-> 怎么打开终端？Mac: `Cmd+空格` 搜"终端"。Windows: `Win+R` 输入 `cmd`。
+## 第二步：打开工具
 
-## 支持的工具
+- **Mac**：双击 `setup.command` 文件
+- **Windows**：右键 `setup.py` → 打开方式 → Python
 
-| 工具 | 自动安装 | 自动配置 |
-|------|---------|---------|
-| CodeBuddy | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Hermes Agent | ✅ | ✅ |
-| DeepSeek Harness | ✅ | ✅ |
-| Cursor | ❌ 需先下载 | ✅ |
-| Windsurf | ❌ 需先下载 | ✅ |
-| TRAE | ❌ 需先下载 | 📝 |
-| Cline | ✅ | 📝 |
-| Kilo Code | ✅ | 📝 |
+> 如果 Mac 提示"无法打开"，去 系统设置 → 隐私与安全性 → 仍要打开。
+
+## 第三步：按提示操作
+
+1. 选择你的套餐（输入数字 1-4）
+2. 粘贴 API Key
+3. 勾选想用的工具（直接回车 = 全部）
+
+完成。工具会自动安装和配置。
+
+---
+
+## 不会？看这里
+
+**怎么打开终端（Mac）**：按 `Cmd + 空格`，输入"终端"，回车。
+
+**怎么打开终端（Windows）**：按 `Win + R`，输入 `cmd`，回车。
+
+**如果双击打不开**：打开终端，把 `setup.py` 拖进去，回车。

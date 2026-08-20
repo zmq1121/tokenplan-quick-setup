@@ -146,11 +146,15 @@ def write_json(path: Path, data: object, merge: bool = False) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
-def write_env(path: Path, **kv: str) -> None:
+def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     old_lines = path.read_text().splitlines() if path.exists() else []
-    keep_lines = [line for line in old_lines if not any(line.startswith(f"{key}=") for key in kv)]
+    managed_keys = set(kv) | set(remove_keys)
+    keep_lines = [
+        line for line in old_lines
+        if not any(line.startswith(f"{key}=") for key in managed_keys)
+    ]
     for key, value in kv.items():
         keep_lines.append(f"{key}={value}")
     path.write_text("\n".join(line for line in keep_lines if line.strip()) + "\n")
@@ -396,32 +400,18 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="codex",
-        name="Codex",
-        backend="cli",
-        check_exe="codex",
-        install_cmd=("npm", "install", "-g", "@openai/codex@latest"),
-        start_hint="codex",
-        cfg_hint="~/.codex/config.toml",
-        usage_lines=(
-            "终端输入: codex",
-            "模型已配置，可直接使用",
-            "重要: Codex 内置 /model 只显示官方 OpenAI 模型，不是 Token Plan 模型目录",
-            "请勿在 /model 中选择 GPT 模型；切换请退出后运行 codex -m <Token Plan 模型ID>",
-            "永久切换可修改 ~/.codex/config.toml 中的 model 字段",
-        ),
-    ),
-    ToolSpec(
         key="dsh",
         name="DeepSeek Harness",
         backend="cli",
         check_exe="npx",
         start_hint="npx @deepseek-ai/dsh web",
-        cfg_hint="~/.dsh/cordis.patch.yml",
+        cfg_hint="~/.dsh/settings.yaml",
         usage_lines=(
             "终端输入: npx @deepseek-ai/dsh web",
             "浏览器打开: http://127.0.0.1:3080",
-            "设置 → 模型 → 添加自定义提供方",
+            "如果提示 ~/.dsh/cordis.patch.yml 格式错误，未使用自定义 patch 时可删除它",
+            "修复: rm ~/.dsh/cordis.patch.yml",
+            "或保留文件: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml",
         ),
     ),
 )
@@ -849,40 +839,6 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     install_claude_tokenplan_path()
 
 
-def get_codex_default_model(plan_key: str) -> str:
-    catalog = get_model_catalog(plan_key)
-    default_model = str(catalog["default"])
-    if default_model != "auto":
-        return default_model
-    model_ids = get_model_ids(plan_key)
-    preferred_models = ("glm-5.2", "deepseek-v4-pro-202606", "hy3")
-    return next(
-        (model for model in preferred_models if model in model_ids),
-        next((model for model in model_ids if model not in {"auto", "glm-5.3"}), default_model),
-    )
-
-
-def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
-    path = cfg_path(".codex", "config.toml")
-    backup_file(path)
-    path.write_text(
-        'model_provider = "TencentCloud"\n'
-        f'model = "{get_codex_default_model(plan.key)}"\n'
-        'model_reasoning_effort = "high"\n'
-        'include_apps_instructions = false\n\n'
-        '[features]\n'
-        'apps = false\n'
-        'connectors = false\n'
-        'enable_mcp_apps = false\n\n'
-        '[model_providers.TencentCloud]\n'
-        'name = "TencentCloud"\n'
-        f'base_url = "{base_url}"\n'
-        'env_key = "Token_Plan_API_KEY"\n'
-        'wire_api = "responses"\n'
-    )
-    write_env(cfg_path(".codex", ".env"), Token_Plan_API_KEY=api_key, OPENAI_BASE_URL=base_url)
-
-
 def patch_hermes_model_routing() -> None:
     install_dir = Path.home() / ".hermes" / "hermes-agent"
     target = install_dir / "hermes_cli" / "model_switch.py"
@@ -900,7 +856,11 @@ def patch_hermes_model_routing() -> None:
 
 def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     patch_hermes_model_routing()
-    write_env(cfg_path(".hermes", ".env"), OPENAI_API_KEY=api_key)
+    write_env(
+        cfg_path(".hermes", ".env"),
+        remove_keys=("TERMINAL_CWD",),
+        OPENAI_API_KEY=api_key,
+    )
     default_model = get_model_catalog(plan.key)["default"]
     models = tuple(get_model_ids(plan.key))
     config_path = cfg_path(".hermes", "config.yaml")
@@ -911,17 +871,16 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     config_path.write_text(
         "model:\n"
         f"  default: {default_model}\n"
-        "  provider: custom\n"
+        "  provider: token-plan\n"
         f"  base_url: {base_url}\n"
-        f"  api_key: {api_key}\n"
-        "custom_providers:\n"
-        f"  - name: Token Plan\n"
-        f"    product_line: {plan.display_name}\n"
-        f"    base_url: {base_url}\n"
+        "  api_key: ${OPENAI_API_KEY}\n"
+        "providers:\n"
+        "  token-plan:\n"
+        "    name: Token Plan\n"
+        f"    api: {base_url}\n"
         "    api_key: ${OPENAI_API_KEY}\n"
-        f"    model: {default_model}\n"
+        f"    default_model: {default_model}\n"
         "    discover_models: false\n"
-        "    models_discovered: false\n"
         f"    models: {{{model_entries}}}\n"
     )
     info("Hermes 已配置为 Token Plan custom 端点")
@@ -930,9 +889,22 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     info(f"默认模型: {default_model}")
 
 
+def get_openai_compatible_default_model(plan_key: str) -> str:
+    catalog = get_model_catalog(plan_key)
+    default_model = str(catalog["default"])
+    if default_model != "auto":
+        return default_model
+    model_ids = get_model_ids(plan_key)
+    preferred_models = ("glm-5.2", "deepseek-v4-pro-202606", "hy3")
+    return next(
+        (model for model in preferred_models if model in model_ids),
+        next((model for model in model_ids if model not in {"auto", "glm-5.3"}), default_model),
+    )
+
+
 def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
     model_ids = get_model_ids(plan.key)
-    default_model = get_codex_default_model(plan.key)
+    default_model = get_openai_compatible_default_model(plan.key)
     config_path = cfg_path(".openclaw", "openclaw.json")
     write_env(cfg_path(".openclaw", ".env"), TOKENPLAN_API_KEY=api_key)
     full_model_ids = [f"tencent-tokenplan/{model_id}" for model_id in model_ids]
@@ -977,8 +949,9 @@ def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
     model_ids = get_model_ids(plan.key)
-    default_model = get_codex_default_model(plan.key)
-    config_path = cfg_path(".config", "opencode", "opencode.json")
+    default_model = get_openai_compatible_default_model(plan.key)
+    config_dir = cfg_path(".config", "opencode")
+    config_path = config_dir / "opencode.json"
     write_json(
         config_path,
         {
@@ -1005,25 +978,45 @@ def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
-    path = cfg_path(".dsh", "cordis.patch.yml")
-    block = f"""
-- insert:
-    - id: tokenplan
-      name: '@deepseek-ai/dsh-llm-pi-ai'
-      config:
-        providers:
-          - id: tokenplan
-            name: Tencent Cloud
-            apiKey: \"{api_key}\"
-            baseURL: \"{base_url}\"
-"""
-    write_append_patch(path, block)
+    settings_path = cfg_path(".dsh", "settings.yaml")
+    credentials_path = cfg_path(".dsh", ".credentials.yaml")
+    patch_path = cfg_path(".dsh", "cordis.patch.yml")
+    model_entries = "\n".join(
+        f"              - id: {model}\n                name: {model}"
+        for model in get_model_ids(plan.key)
+    )
+    backup_file(settings_path)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        "llm-pi-ai:\n"
+        "  providers:\n"
+        "    tokenplan:\n"
+        "      displayName: Tencent Cloud Token Plan\n"
+        "      apiKeyEnv: TOKENPLAN_API_KEY\n"
+        "      api: openai-completions\n"
+        f"      baseURL: {base_url}\n"
+        "      models:\n"
+        f"{model_entries}\n"
+        "agent-default-model:\n"
+        "  provider: tokenplan\n"
+        f"  model: {get_model_catalog(plan.key)['default']}\n"
+    )
+    backup_file(credentials_path)
+    credentials_path.write_text(
+        json.dumps({"TOKENPLAN_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n"
+    )
+    backup_file(patch_path)
+    patch_path.write_text("[]\n")
+    info("DeepSeek Harness 已更新内置 pi-ai Provider 设置")
+    warn("若启动时提示 ~/.dsh/cordis.patch.yml 格式错误，可执行：")
+    info("rm ~/.dsh/cordis.patch.yml")
+    info("然后重新运行: npx @deepseek-ai/dsh web")
+    info("也可以保留文件并执行: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml")
 
 
 CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "codebuddy": configure_codebuddy,
     "claude-code": configure_claude_code,
-    "codex": configure_codex,
     "hermes": configure_hermes,
     "dsh": configure_dsh,
     "openclaw": configure_openclaw,
@@ -1224,13 +1217,7 @@ def main() -> None:
             print()
             continue
 
-        if tool.key == "codex" and supports_auto_install(tool) and already_installed:
-            dim("正在检查并更新 Codex，避免旧版 macOS 签名或架构问题")
-            if not install_tool(tool):
-                failed.append((tool, "更新失败"))
-                print()
-                continue
-        elif not already_installed and supports_auto_install(tool):
+        if not already_installed and supports_auto_install(tool):
             if repair_mode:
                 skipped.append(tool)
                 warn(f"{tool.name} 未检测到已安装状态，修复模式已跳过安装")

@@ -42,7 +42,7 @@
 - macOS 12 Monterey 或更高版本；
 - Python 3；
 - 网络连接和当前用户的文件写入权限；
-- 选择 CodeBuddy Code、Claude Code 或 Codex 时，需要 Node.js LTS（包含 npm）；
+- 选择 CodeBuddy Code、Claude Code、OpenCode、OpenClaw 或 DeepSeek Harness 时，需要 Node.js LTS（包含 npm）；
 - 选择 Hermes Agent 或 OpenClaw 时，需要 curl；
 - 选择 Cline 或 Kilo Code 时，需要已安装 VS Code 和 `code` 命令。
 
@@ -54,12 +54,45 @@ source ~/.zshrc
 
 如果双击 `.command` 被 macOS 拦截，请右键文件，选择“打开”，再确认一次。当前版本会在安装前检查 Mac 架构和关键依赖；缺少 Node.js 或 curl 时会停止并显示修复地址，不会让用户在后续步骤中遇到难以理解的 npm 错误。
 
+## setup.command 使用限制
+
+- 仅支持 macOS 12+，需要 Python 3、网络连接以及当前用户的配置目录写入权限。
+- 运行时需要手动输入 API Key；Key 会写入当前用户本机的工具配置，用于工具认证，不会写入 `setup.command` 模板。
+- 安装器只修改用户选择的工具配置；未选择的工具不会被安装或重写。
+- 如果选择 DeepSeek Harness，需要 Node.js LTS、npm/npx；首次启动由 `npx` 下载或使用本地 DSH 包。
+- `setup.command` 不是后台服务，也不会自动更新工具；修改套餐或 Key 后需要重新运行。
+- macOS 首次拦截 `.command` 时，需要右键选择“打开”。
+
+## DeepSeek Harness 启动故障提示
+
+如果运行 `npx @deepseek-ai/dsh web` 时提示：
+
+```text
+patches ~/.dsh/cordis.patch.yml must be a top-level YAML array
+```
+
+说明该文件为空或格式错误。未使用自定义 patch 时可以删除：
+
+```bash
+rm ~/.dsh/cordis.patch.yml
+npx @deepseek-ai/dsh web
+```
+
+也可以保留文件并重置为空数组：
+
+```bash
+printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml
+npx @deepseek-ai/dsh web
+```
+
+如果企业版可以正常运行，通常说明 Node.js、`npx` 和 DSH 主程序本身没有问题，优先检查当前用户目录下的本地 patch 配置。
+
 ## OpenClaw 和 OpenCode
 
 安装器会自动安装并配置这两个工具：
 
 - OpenClaw：写入 `~/.openclaw/openclaw.json` 和 `~/.openclaw/.env`，使用 `tencent-tokenplan` Provider；安装器会同时写入 `agents.defaults.models` allowlist，避免内置的一百多个模型遮住 Token Plan 模型。启动后运行 `openclaw models list --provider tencent-tokenplan` 应只看到当前套餐模型。
-- OpenCode：写入 `~/.config/opencode/opencode.json`，使用 `tokenplan` 自定义 Provider；其当前配置按 OpenAI-compatible Chat Completions 端点生成，不与 Codex 的 Responses API 配置混用。
+- OpenCode：写入 `~/.config/opencode/opencode.json`，使用 `tokenplan` 自定义 Provider；其当前配置按 OpenAI-compatible Chat Completions 端点生成，单独使用 OpenAI-compatible Chat Completions 配置。
 
 OpenClaw 和 OpenCode 都需要 Node.js/npm；OpenClaw 的安装脚本还需要 curl。首次启动时如果工具提示需要初始化，请按工具提示完成一次初始化即可。
 
@@ -122,12 +155,3 @@ source ~/.zshrc
 ~/.claude/tokenplan-models.json
 ```
 
-## Codex 模型说明
-
-Codex 使用 Token Plan 时，脚本会优先写入当前套餐中的具体默认模型，并使用新版 `responses` 接口。对于只有 Auto 路由的轻享套餐仍会保留 `auto`；其它有具体模型的套餐不要把 `model` 手动改成 `auto`，否则新版 Codex 可能提示：
-
-```text
-Model metadata for `auto` not found
-```
-
-重新运行脚本配置 Codex 后即可恢复正确的默认模型。

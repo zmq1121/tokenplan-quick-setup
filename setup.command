@@ -308,6 +308,24 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
 
 TOOLS: Tuple[ToolSpec, ...] = (
     ToolSpec(
+        key="hermes",
+        name="Hermes Agent",
+        backend="cli",
+        check_exe="hermes",
+        start_hint="hermes",
+        cfg_hint="~/.hermes/.env",
+        install_cmd=(
+            "bash",
+            "-c",
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use --skip-setup",
+        ),
+        usage_lines=(
+            "终端输入: hermes",
+            "切换模型: 输入 /model",
+            "模型列表: 由 Hermes 从当前 custom 端点自动发现",
+        ),
+    ),
+    ToolSpec(
         key="codebuddy",
         name="CodeBuddy Code",
         backend="cli",
@@ -336,7 +354,24 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "完整模型选择器: claude-tokenplan",
             "重要: Claude 内置 /model 只显示固定槽位，不能显示全部 Token Plan 模型",
             "其它模型请用 claude --model <模型ID>，或运行 claude-tokenplan 选择",
-            "已启用 high 思考强度；glm-5.3 始终思考，不支持关闭思考（可用 low、high 或 max）",
+            "glm-5.3 始终思考：已启用 Thinking mode，并默认使用 high effort",
+            "模型与强度需分别执行：先提交 /model <模型ID>，成功后再单独提交 /effort low|high|max",
+            "不要一次粘贴两行，也不要使用 /model <模型ID> low；它们都会被当成模型 ID",
+        ),
+    ),
+    ToolSpec(
+        key="opencode",
+        name="OpenCode",
+        backend="cli",
+        check_exe="opencode",
+        start_hint="opencode",
+        cfg_hint="~/.config/opencode/opencode.json",
+        install_cmd=("npm", "install", "-g", "opencode-ai"),
+        usage_lines=(
+            "终端输入: opencode",
+            "项目初始化: 在 OpenCode 中输入 /init",
+            "切换模型: 输入 /models",
+            "Token Plan 使用 OpenAI-compatible Chat Completions 端点",
         ),
     ),
     ToolSpec(
@@ -356,24 +391,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="hermes",
-        name="Hermes Agent",
-        backend="cli",
-        check_exe="hermes",
-        start_hint="hermes",
-        cfg_hint="~/.hermes/.env",
-        install_cmd=(
-            "bash",
-            "-c",
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use --skip-setup",
-        ),
-        usage_lines=(
-            "终端输入: hermes",
-            "切换模型: 输入 /model",
-            "模型列表: 由 Hermes 从当前 custom 端点自动发现",
-        ),
-    ),
-    ToolSpec(
         key="dsh",
         name="DeepSeek Harness",
         backend="cli",
@@ -387,57 +404,24 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="cursor",
-        name="Cursor",
-        backend="desktop",
-        download_url="https://cursor.com/downloads",
-        start_hint="cursor",
-        cfg_hint="Cursor 设置文件",
-        usage_lines=("打开 Cursor → 设置 → 模型",),
-    ),
-    ToolSpec(
-        key="windsurf",
-        name="Windsurf",
-        backend="desktop",
-        download_url="https://codeium.com/windsurf/download",
-        start_hint="windsurf",
-        cfg_hint="Windsurf 设置文件",
-        usage_lines=("打开 Windsurf → 设置 → 模型",),
-    ),
-    ToolSpec(
-        key="trae",
-        name="TRAE",
-        backend="desktop",
-        download_url="https://www.trae.ai/download",
-        start_hint="TRAE.app",
-        cfg_hint="TRAE 设置",
-        usage_lines=("打开 TRAE → 设置 → 模型",),
-    ),
-    ToolSpec(
-        key="cline",
-        name="Cline (VS Code 插件)",
-        backend="plugin",
-        check_exe="code",
-        install_cmd=("code", "--install-extension", "saoudrizwan.claude-dev"),
-        start_hint="VS Code → Cline",
-        cfg_hint="Cline 插件设置",
-        usage_lines=(
-            "安装后重启 VS Code",
-            "按 Cmd+Shift+X 搜索 Cline，或执行 code --list-extensions 检查",
-            "如果 VS Code 是从 App Store 安装，需在该 VS Code 内打开命令面板安装",
+        key="openclaw",
+        name="OpenClaw",
+        backend="cli",
+        check_exe="openclaw",
+        start_hint="openclaw",
+        cfg_hint="~/.openclaw/openclaw.json",
+        install_cmd=(
+            "bash",
+            "-c",
+            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
         ),
-    ),
-    ToolSpec(
-        key="kilo-code",
-        name="Kilo Code",
-        backend="plugin",
-        check_exe="code",
-        install_cmd=("code", "--install-extension", "kilocode.kilocode"),
-        start_hint="VS Code → Kilo Code",
-        cfg_hint="Kilo Code 插件设置",
         usage_lines=(
-            "安装后重启 VS Code",
-            "按 Cmd+Shift+X 搜索 Kilo Code，或执行 code --list-extensions 检查",
+            "终端输入: openclaw",
+            "检查配置: openclaw config validate",
+            "仅看套餐模型: openclaw models list --provider tencent-tokenplan",
+            "切换模型: openclaw models set tencent-tokenplan/<模型ID>",
+            "不要运行 /auth tencent-token-plan；该名称不是本安装器配置的 Provider",
+            "Token Plan 使用 API Key，无需 ChatGPT 或其他网页登录",
         ),
     ),
 )
@@ -448,6 +432,7 @@ TOOL_BY_KEY = {tool.key: tool for tool in TOOLS}
 
 TOOL_DEPENDENCY_REGISTRY = {
     "hermes": ("curl",),
+    "openclaw": ("curl",),
     "dsh": ("npx",),
 }
 
@@ -644,9 +629,24 @@ def render_usage_lines(tool: ToolSpec, base_url: str, api_key: str) -> List[str]
     return rendered
 
 
-def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> None:
+def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
     print("  ── 前置检查 ──")
     print()
+
+    if sys.platform == "darwin":
+        architecture = os.uname().machine
+        macos_version = "未知"
+        try:
+            macos_version = subprocess.check_output(
+                ["sw_vers", "-productVersion"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        ok(f"macOS {macos_version} ({architecture})")
+        if architecture not in {"arm64", "x86_64"}:
+            warn(f"未验证的 Mac 架构: {architecture}")
+    elif sys.platform != "win32":
+        info(f"当前平台: {sys.platform}")
 
     needs_node = any(
         tool.backend in {"cli", "plugin"}
@@ -656,6 +656,7 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> None:
     )
     needs_code = any(requires_backend_dependency(tool, "code") for tool in selected_tools)
     needs_curl = any(requires_backend_dependency(tool, "curl") for tool in selected_tools)
+    prerequisites_ready = True
     ok("Python 3")
 
     if needs_node:
@@ -677,10 +678,14 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> None:
             warn("未安装 npm，Node 工具安装可能失败")
         if npx_ok:
             ok("npx")
-        else:
+        elif any(requires_backend_dependency(tool, "npx") for tool in selected_tools):
             warn("未安装 npx，DeepSeek Harness 将无法启动")
         if not node_ok or not npm_ok:
-            warn("当前环境缺少 Node 依赖，部分工具将跳过自动安装")
+            prerequisites_ready = False
+            warn("当前环境缺少 Node 依赖，所选 Node 工具无法安装")
+            info("请安装 Node.js LTS 后重新运行本安装器")
+            if sys.platform == "darwin":
+                info("推荐地址: https://nodejs.org/en/download")
 
     if needs_code:
         if shutil.which("code"):
@@ -692,12 +697,14 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> None:
         if shutil.which("curl"):
             ok("curl")
         else:
+            prerequisites_ready = False
             warn("未安装 curl，Hermes 自动安装可能失败")
 
     if shutil.which("git"):
         ok("git")
 
     print()
+    return prerequisites_ready
 
 
 def get_model_catalog(plan_key: str) -> Dict[str, object]:
@@ -805,6 +812,7 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
         {
             "env": env,
             "model": default_model,
+            "alwaysThinkingEnabled": True,
             "tokenplan": {
                 "provider": "anthropic",
                 "base_url": anthropic_url,
@@ -847,7 +855,11 @@ def get_codex_default_model(plan_key: str) -> str:
     if default_model != "auto":
         return default_model
     model_ids = get_model_ids(plan_key)
-    return next((model for model in model_ids if model != "auto"), default_model)
+    preferred_models = ("glm-5.2", "deepseek-v4-pro-202606", "hy3")
+    return next(
+        (model for model in preferred_models if model in model_ids),
+        next((model for model in model_ids if model not in {"auto", "glm-5.3"}), default_model),
+    )
 
 
 def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
@@ -855,7 +867,13 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
     backup_file(path)
     path.write_text(
         'model_provider = "TencentCloud"\n'
-        f'model = "{get_codex_default_model(plan.key)}"\n\n'
+        f'model = "{get_codex_default_model(plan.key)}"\n'
+        'model_reasoning_effort = "high"\n'
+        'include_apps_instructions = false\n\n'
+        '[features]\n'
+        'apps = false\n'
+        'connectors = false\n'
+        'enable_mcp_apps = false\n\n'
         '[model_providers.TencentCloud]\n'
         'name = "TencentCloud"\n'
         f'base_url = "{base_url}"\n'
@@ -912,6 +930,80 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     info(f"默认模型: {default_model}")
 
 
+def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    model_ids = get_model_ids(plan.key)
+    default_model = get_codex_default_model(plan.key)
+    config_path = cfg_path(".openclaw", "openclaw.json")
+    write_env(cfg_path(".openclaw", ".env"), TOKENPLAN_API_KEY=api_key)
+    full_model_ids = [f"tencent-tokenplan/{model_id}" for model_id in model_ids]
+    write_json(
+        config_path,
+        {
+            "models": {
+                "mode": "merge",
+                "providers": {
+                    "tencent-tokenplan": {
+                        "baseUrl": base_url,
+                        "apiKey": "${TOKENPLAN_API_KEY}",
+                        "api": "openai-completions",
+                        "models": [
+                            {
+                                "id": model_id,
+                                "name": model_id,
+                                "reasoning": model_id not in {"auto"},
+                            }
+                            for model_id in model_ids
+                        ],
+                    }
+                },
+            },
+            "agents": {
+                "defaults": {
+                    "model": {"primary": f"tencent-tokenplan/{default_model}"},
+                    "models": {
+                        full_model_id: {
+                            "alias": full_model_id.split("/", 1)[1],
+                            "agentRuntime": {"id": "openclaw"},
+                        }
+                        for full_model_id in full_model_ids
+                    },
+                }
+            },
+        },
+        merge=True,
+    )
+    info("OpenClaw 已写入 Token Plan 自定义 Provider")
+
+
+def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    model_ids = get_model_ids(plan.key)
+    default_model = get_codex_default_model(plan.key)
+    config_path = cfg_path(".config", "opencode", "opencode.json")
+    write_json(
+        config_path,
+        {
+            "$schema": "https://opencode.ai/config.json",
+            "model": f"tokenplan/{default_model}",
+            "provider": {
+                "tokenplan": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "Tencent Cloud Token Plan",
+                    "options": {
+                        "baseURL": base_url,
+                        "apiKey": api_key,
+                    },
+                    "models": {
+                        model_id: {"name": model_id}
+                        for model_id in model_ids
+                    },
+                }
+            },
+        },
+        merge=True,
+    )
+    info("OpenCode 已写入 Token Plan 自定义 Provider")
+
+
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
     path = cfg_path(".dsh", "cordis.patch.yml")
     block = f"""
@@ -934,6 +1026,8 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "codex": configure_codex,
     "hermes": configure_hermes,
     "dsh": configure_dsh,
+    "openclaw": configure_openclaw,
+    "opencode": configure_opencode,
 }
 
 
@@ -1084,7 +1178,10 @@ def main() -> None:
         warn("未选择任何工具，脚本已结束")
         return
 
-    check_prerequisites(selected_tools)
+    prerequisites_ready = check_prerequisites(selected_tools)
+    if not prerequisites_ready:
+        warn("关键前置条件未满足，请先按上面的提示完成安装，再重新运行本安装器")
+        return
 
     print(f"  ── 正在配置 {len(selected_tools)} 个工具 ──")
     print()

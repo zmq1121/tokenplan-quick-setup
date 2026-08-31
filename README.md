@@ -6,11 +6,18 @@
 
 ## Mac 用户
 
-把 `setup.command` 存到桌面 → **双击** → 三步完成。
+把 `setup.command` 下载到本地后，在终端运行：
 
-## Windows 用户
+```bash
+bash setup.command
+```
 
-把 `setup.bat` 存到桌面 → **双击** → 三步完成。
+如果想要更短的命令，可以把脚本复制为 `tokenplan-setup` 后运行：
+
+```bash
+chmod +x tokenplan-setup
+./tokenplan-setup
+```
 
 ---
 
@@ -18,8 +25,7 @@
 
 | 系统 | 发哪个文件 | 怎么用 |
 |------|-----------|--------|
-| Mac | `setup.command` | 双击 |
-| Windows | `setup.bat` | 双击 |
+| Mac | `setup.command` | `bash setup.command` |
 
 微信/QQ/邮件直接发一个文件就行。
 
@@ -42,9 +48,8 @@
 - macOS 12 Monterey 或更高版本；
 - Python 3；
 - 网络连接和当前用户的文件写入权限；
-- 选择 CodeBuddy Code、Claude Code、OpenCode、OpenClaw 或 DeepSeek Harness 时，需要 Node.js LTS（包含 npm）；
+- 选择 CodeBuddy Code、Claude Code、OpenCode、OpenClaw 或 DeepSeek Harness 时，需要 Node.js LTS（包含 npm）；这些 CLI 工具若未安装，安装器会先尝试自动安装；
 - 选择 Hermes Agent 或 OpenClaw 时，需要 curl；
-- 选择 Cline 或 Kilo Code 时，需要已安装 VS Code 和 `code` 命令。
 
 如果是全新 Mac，建议先安装 [Node.js LTS](https://nodejs.org/en/download)。首次安装 CLI 后请关闭并重新打开终端；如果提示 `command not found`，执行：
 
@@ -60,12 +65,12 @@ source ~/.zshrc
 - 运行时需要手动输入 API Key；Key 会写入当前用户本机的工具配置，用于工具认证，不会写入 `setup.command` 模板。
 - 安装器只修改用户选择的工具配置；未选择的工具不会被安装或重写。
 - 如果选择 DeepSeek Harness，需要 Node.js LTS、npm/npx；首次启动由 `npx` 下载或使用本地 DSH 包。
-- `setup.command` 不是后台服务，也不会自动更新工具；修改套餐或 Key 后需要重新运行。
+- `setup.command` 是一个 CLI 安装入口；修改套餐或 Key 后需要重新运行。
 - macOS 首次拦截 `.command` 时，需要右键选择“打开”。
 
 ## DeepSeek Harness 启动故障提示
 
-如果运行 `npx @deepseek-ai/dsh web` 时提示：
+如果运行 `dsh web` 时提示：
 
 ```text
 patches ~/.dsh/cordis.patch.yml must be a top-level YAML array
@@ -75,14 +80,14 @@ patches ~/.dsh/cordis.patch.yml must be a top-level YAML array
 
 ```bash
 rm ~/.dsh/cordis.patch.yml
-npx @deepseek-ai/dsh web
+dsh web
 ```
 
 也可以保留文件并重置为空数组：
 
 ```bash
 printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml
-npx @deepseek-ai/dsh web
+dsh web
 ```
 
 如果企业版可以正常运行，通常说明 Node.js、`npx` 和 DSH 主程序本身没有问题，优先检查当前用户目录下的本地 patch 配置。
@@ -93,8 +98,37 @@ npx @deepseek-ai/dsh web
 
 - OpenClaw：写入 `~/.openclaw/openclaw.json` 和 `~/.openclaw/.env`，使用 `tencent-tokenplan` Provider；安装器会同时写入 `agents.defaults.models` allowlist，避免内置的一百多个模型遮住 Token Plan 模型。启动后运行 `openclaw models list --provider tencent-tokenplan` 应只看到当前套餐模型。
 - OpenCode：写入 `~/.config/opencode/opencode.json`，使用 `tokenplan` 自定义 Provider；其当前配置按 OpenAI-compatible Chat Completions 端点生成，单独使用 OpenAI-compatible Chat Completions 配置。
+- DeepSeek Harness：通过本机 `dsh` CLI 接入，启动后运行 `dsh web`；若系统未安装 `dsh`，安装器会先尝试自动安装。
 
 OpenClaw 和 OpenCode 都需要 Node.js/npm；OpenClaw 的安装脚本还需要 curl。首次启动时如果工具提示需要初始化，请按工具提示完成一次初始化即可。
+
+## CLI 使用说明
+
+本安装器现在是一个终端 CLI 入口，默认命令为：
+
+```bash
+bash setup.command
+```
+
+也可以把它复制成 `tokenplan-setup` 后运行：
+
+```bash
+chmod +x tokenplan-setup
+./tokenplan-setup
+```
+
+支持的子命令：
+
+- `setup`：安装并补全配置，默认模式；
+- `repair`：仅修复已安装工具的配置；
+- `doctor`：只检查环境和安装状态，不修改任何文件。
+
+例如：
+
+```bash
+bash setup.command doctor
+bash setup.command repair --plan enterprise-pro --tools dsh,opencode
+```
 
 ## Claude Code 模型选择说明
 

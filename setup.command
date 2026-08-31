@@ -2,7 +2,8 @@
 "exec" "python3" "$0" "$@"
 # -*- coding: utf-8 -*-
 # 腾讯云 Token Plan — 小白一键接入
-# Mac: 双击此文件 | Windows: 右键→Python 打开
+# Mac: 终端运行 | Windows: 右键→Python 打开
+import argparse
 import json
 import os
 import shutil
@@ -403,11 +404,12 @@ TOOLS: Tuple[ToolSpec, ...] = (
         key="dsh",
         name="DeepSeek Harness",
         backend="cli",
-        check_exe="npx",
-        start_hint="npx @deepseek-ai/dsh web",
+        check_exe="dsh",
+        install_cmd=("npm", "install", "-g", "@deepseek-ai/dsh@latest"),
+        start_hint="dsh web",
         cfg_hint="~/.dsh/settings.yaml",
         usage_lines=(
-            "终端输入: npx @deepseek-ai/dsh web",
+            "终端输入: dsh web",
             "浏览器打开: http://127.0.0.1:3080",
             "如果提示 ~/.dsh/cordis.patch.yml 格式错误，未使用自定义 patch 时可删除它",
             "修复: rm ~/.dsh/cordis.patch.yml",
@@ -1123,23 +1125,125 @@ def print_usage(tool: ToolSpec, base_url: str, api_key: str) -> None:
     print()
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="tokenplan-setup",
+        description="腾讯云 Token Plan 一键接入 CLI",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("setup", "repair", "doctor"),
+        default="setup",
+        help="setup=安装配置（默认），repair=仅修复已安装工具，doctor=仅检查环境",
+    )
+    parser.add_argument(
+        "--plan",
+        choices=tuple(item.key for item in PLAN_CATALOG.values()),
+        help="套餐 key，例如 enterprise-pro",
+    )
+    parser.add_argument(
+        "--api-key",
+        dest="api_key",
+        help="直接传入 API Key；不传则交互输入",
+    )
+    parser.add_argument(
+        "--tools",
+        help="要处理的工具，支持编号或 key，逗号/空格分隔；不传则交互选择",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="尽量跳过确认提示（适合自动化）",
+    )
+    return parser
+
+
+def resolve_plan_from_arg(plan_key: Optional[str]) -> Optional[PlanSpec]:
+    if not plan_key:
+        return None
+    for item in PLAN_CATALOG.values():
+        if plan_key in {item.key, item.choice}:
+            return item
+    return None
+
+
+def resolve_tools_from_arg(raw: Optional[str]) -> Optional[List[ToolSpec]]:
+    if raw is None:
+        return None
+    tokens = raw.replace(",", " ").split()
+    if not tokens:
+        return []
+    lowered = {token.lower() for token in tokens}
+    if lowered & {"all", "*"}:
+        return list(TOOLS)
+    if lowered & {"none", "0"}:
+        return []
+    selected: List[ToolSpec] = []
+    invalid: List[str] = []
+    for token in tokens:
+        tool = TOOL_BY_INDEX.get(token) or TOOL_BY_KEY.get(token) or TOOL_BY_KEY.get(token.lower())
+        if tool and tool not in selected:
+            selected.append(tool)
+        elif not tool:
+            invalid.append(token)
+    if invalid:
+        warn(f"已忽略无效工具项: {', '.join(invalid)}")
+    return selected
+
+
+def run_doctor(selected_tools: List[ToolSpec]) -> int:
     clear()
     print()
     print("  ╔══════════════════════════════════════════════╗")
-    print("  ║   腾讯云 Token Plan — 小白一键接入          ║")
+    print("  ║           Token Plan 环境诊断               ║")
+    print("  ╚══════════════════════════════════════════════╝")
+    print()
+    check_prerequisites(selected_tools)
+    print()
+    print("  ── 工具状态 ──")
+    print()
+    for tool in selected_tools:
+        installed = is_tool_installed(tool)
+        status = "已安装" if installed else "未安装"
+        print(f"  {tool.name}: {status}")
+        print(f"    配置位置: {tool.cfg_hint}")
+        if not installed and supports_auto_install(tool):
+            print("    将自动安装: 是")
+            if tool.install_cmd:
+                if isinstance(tool.install_cmd, tuple):
+                    print(f"    安装命令: {' '.join(tool.install_cmd)}")
+                else:
+                    print(f"    安装命令: {tool.install_cmd}")
+        elif not installed:
+            print("    将自动安装: 否")
+        print()
+    return 0
+
+
+def main() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    selected_tools = resolve_tools_from_arg(args.tools)
+    if selected_tools is None:
+        selected_tools = list(TOOLS)
+    if args.command == "doctor":
+        run_doctor(selected_tools)
+        return
+
+    clear()
+    print()
+    print("  ╔══════════════════════════════════════════════╗")
+    print("  ║   腾讯云 Token Plan — 一键接入 CLI         ║")
     print("  ║   只需 API Key，其余尽可能自动              ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
-    print("  四步完成：选套餐 → 输 Key → 选模式 → 选工具")
-    print()
-    print("  外部客户使用建议：")
-    print("    1. 请确保在可信网络环境下运行")
-    print("    2. 请优先使用官方渠道安装依赖")
-    print("    3. 如为企业电脑，建议由 IT 管理员协助安装 Node.js / VS Code")
+    print("  命令: setup / repair / doctor")
+    print("  默认: setup")
     print()
 
-    plan = choose_plan()
+    plan = resolve_plan_from_arg(args.plan) or choose_plan()
     base_url = plan.base_url
     key_url = plan.key_url
 
@@ -1149,7 +1253,7 @@ def main() -> None:
     print()
     info("建议使用有权限的完整 API Key，粘贴时请避免前后空格")
     print()
-    api_key = ask("  请粘贴 API Key: ")
+    api_key = args.api_key.strip() if args.api_key else ask("  请粘贴 API Key: ")
     api_key = api_key.strip()
     if len(api_key) < 10:
         print(f"\n  {YELLOW}❌ API Key 无效，请重新运行。{RESET}")
@@ -1159,14 +1263,13 @@ def main() -> None:
     if not verify_api_key(base_url, api_key, plan):
         warn("API Key 验证失败，请检查 Key 是否正确")
         print()
-        if ask("  是否继续？(y/n): ").lower() != "y":
+        if not args.yes and ask("  是否继续？(y/n): ").lower() != "y":
             return
     else:
         ok("API Key 验证通过")
     print()
 
-    repair_mode = choose_run_mode()
-    selected_tools = choose_tools()
+    repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())
     if not selected_tools:
         warn("未选择任何工具，脚本已结束")
         return
@@ -1212,10 +1315,17 @@ def main() -> None:
             continue
 
         if requires_backend_dependency(tool, "npx") and not shutil.which("npx"):
-            failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
-            warn("DeepSeek Harness 需要 Node.js / npx")
-            print()
-            continue
+            if args.command == "setup":
+                warn("检测到缺少 npx，先自动安装 DeepSeek Harness 所需 Node.js 依赖")
+                if not install_tool(tool):
+                    failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
+                    print()
+                    continue
+            else:
+                failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
+                warn("DeepSeek Harness 需要 Node.js / npx")
+                print()
+                continue
 
         if not already_installed and supports_auto_install(tool):
             if repair_mode:
@@ -1306,7 +1416,8 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-        input("  按回车退出...")
+        if sys.stdin.isatty():
+            input("  按回车退出...")
     except KeyboardInterrupt:
         print(f"\n  {YELLOW}已取消{RESET}")
     except EOFError:

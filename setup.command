@@ -30,7 +30,13 @@ BACKUP_DIR = HOME / ".tokenplan-backups"
 DEFAULT_TIMEOUT = 10
 
 
+IS_WINDOWS = sys.platform == "win32"
+
+
 def clear() -> None:
+    if IS_WINDOWS:
+        os.system("cls")
+        return
     print("\033[2J\033[H", end="")
 
 
@@ -94,6 +100,22 @@ class Spinner:
             warn(f"{self.msg} (失败)")
 
 
+def enable_windows_ansi() -> None:
+    """Enable VT100/ANSI escape processing on legacy Windows consoles."""
+    if not IS_WINDOWS:
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0007)
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True)
 class PlanSpec:
     choice: str
@@ -111,6 +133,8 @@ class ToolSpec:
     backend: str
     check_exe: Optional[str] = None
     install_cmd: Optional[Union[tuple[str, ...], str]] = None
+    install_cmd_win: Optional[Union[tuple[str, ...], str]] = None
+    win_manual: bool = False
     download_url: Optional[str] = None
     start_hint: str = ""
     cfg_hint: str = ""
@@ -124,6 +148,10 @@ def backup_file(path: Path) -> Optional[Path]:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = BACKUP_DIR / f"{path.name}.{ts}.bak"
     shutil.copy2(path, backup)
+    manifest = BACKUP_DIR / "manifest.jsonl"
+    entry = {"backup": backup.name, "original": str(path), "ts": ts}
+    with manifest.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
     return backup
 
 
@@ -181,6 +209,15 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
         if isinstance(command, tuple):
             proc = subprocess.Popen(
                 command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        elif IS_WINDOWS:
+            proc = subprocess.Popen(
+                command,
+                shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -324,10 +361,13 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "-c",
             "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use --skip-setup",
         ),
+        win_manual=True,
+        download_url="https://hermes-agent.nousresearch.com",
         usage_lines=(
             "终端输入: hermes",
             "切换模型: 输入 /model",
             "模型列表: 由 Hermes 从当前 custom 端点自动发现",
+            "Windows: 暂不支持自动安装，请参考官网手动安装后重跑修复模式",
         ),
     ),
     ToolSpec(
@@ -391,6 +431,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "-c",
             "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
         ),
+        install_cmd_win=("npm", "install", "-g", "openclaw@latest"),
+        download_url="https://openclaw.ai",
         usage_lines=(
             "终端输入: openclaw",
             "检查配置: openclaw config validate",
@@ -472,8 +514,34 @@ def get_backend_adapter(tool: ToolSpec) -> Dict[str, object]:
     })
 
 
+def get_npm_prefix_dir() -> Optional[Path]:
+    """Return the npm global prefix directory, or None if unavailable."""
+    npm = shutil.which("npm")
+    if not npm:
+        return None
+    try:
+        prefix = subprocess.check_output(
+            [npm, "config", "get", "prefix"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not prefix or prefix in {"null", "undefined"}:
+        return None
+    return Path(prefix)
+
+
 def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
     """Provide CodeBuddy Code's documented API-key authentication path."""
+    if IS_WINDOWS:
+        for key, value in (
+            ("CODEBUDDY_API_KEY", api_key),
+            ("OPENAI_API_KEY", api_key),
+            ("OPENAI_BASE_URL", base_url),
+        ):
+            os.environ[key] = value
+            subprocess.run(["setx", key, value], capture_output=True, check=False)
+        info("已写入 Windows 用户环境变量，重新打开终端后生效")
+        return
     env_path = cfg_path(".codebuddy", "tokenplan.env")
     env_path.write_text(
         f"export CODEBUDDY_API_KEY={json.dumps(api_key)}\n"
@@ -510,20 +578,66 @@ def install_claude_tokenplan_path() -> None:
         os.environ["PATH"] = f"{launcher_dir}:{current_path}"
 
 
+def _claude_tokenplan_cmd(model_ids: List[str]) -> str:
+    """Render a Windows batch launcher for the Token Plan model selector."""
+    models = " ".join(model_ids)
+    lines = [
+        "@echo off",
+        "chcp 65001 >nul",
+        "setlocal enabledelayedexpansion",
+        f"set MODELS={models}",
+        "echo Token Plan models:",
+        "set /a IDX=0",
+        "for %%M in (%MODELS%) do (",
+        "  set /a IDX+=1",
+        "  echo   !IDX!. %%M",
+        ")",
+        "set /p CHOICE=Select number or type full model ID: ",
+        "set MODEL=",
+        "set /a IDX=0",
+        "for %%M in (%MODELS%) do (",
+        "  set /a IDX+=1",
+        '  if "!CHOICE!"=="!IDX!" set MODEL=%%M',
+        ")",
+        "if not defined MODEL set MODEL=%CHOICE%",
+        'if "%MODEL%"=="" (',
+        "  echo Invalid selection",
+        "  endlocal & exit /b 1",
+        ")",
+        "endlocal & claude --model %MODEL% %*",
+    ]
+    return "\r\n".join(lines) + "\r\n"
+
+
+def install_claude_tokenplan_launcher_win(model_ids: List[str]) -> None:
+    """Write claude-tokenplan.cmd into the npm global dir (already on PATH)."""
+    prefix = get_npm_prefix_dir()
+    target_dir = prefix if prefix and prefix.is_dir() else cfg_path(".local", "bin")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    launcher = target_dir / "claude-tokenplan.cmd"
+    launcher.write_text(_claude_tokenplan_cmd(model_ids), encoding="utf-8")
+    if prefix:
+        info(f"已写入模型选择器: {launcher}")
+    else:
+        warn(f"未检测到 npm 全局目录，请手动将该目录加入 PATH: {target_dir}")
+
+
 def ensure_npm_bin_on_path() -> None:
     """Make globally installed npm CLI commands available in future shells."""
-    npm = shutil.which("npm")
-    if not npm:
+    prefix = get_npm_prefix_dir()
+    if not prefix:
         return
-    try:
-        prefix = subprocess.check_output(
-            [npm, "config", "get", "prefix"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except (OSError, subprocess.SubprocessError):
+
+    if IS_WINDOWS:
+        # Windows npm shims (.cmd) live in the prefix root itself.
+        path_value = str(prefix)
+        current_path = os.environ.get("PATH", "")
+        parts = [p for p in current_path.split(";") if p]
+        if path_value.lower() not in [p.lower() for p in parts]:
+            os.environ["PATH"] = f"{path_value};{current_path}"
         return
-    if not prefix or prefix in {"null", "undefined"}:
-        return
-    npm_bin = Path(prefix) / "bin"
+
+    npm_bin = prefix / "bin"
     if not npm_bin.is_dir():
         return
 
@@ -577,24 +691,43 @@ def requires_backend_dependency(tool: ToolSpec, dependency: str) -> bool:
     return dependency in TOOL_DEPENDENCY_REGISTRY.get(tool.key, ())
 
 
+def get_install_command(tool: ToolSpec) -> Optional[Union[Tuple[str, ...], str]]:
+    """Return the install command for the current platform.
+
+    Windows prefers an explicit install_cmd_win when present; otherwise it
+    falls back to install_cmd only when that command is platform-neutral
+    (e.g. npm tuples), never for bash/curl pipelines.
+    """
+    if IS_WINDOWS:
+        if tool.install_cmd_win is not None:
+            return tool.install_cmd_win
+        cmd = tool.install_cmd
+        if isinstance(cmd, tuple) and cmd and cmd[0] not in {"bash", "sh"}:
+            return cmd
+        return None
+    return tool.install_cmd
+
+
 def should_manual_download(tool: ToolSpec) -> bool:
+    if IS_WINDOWS and tool.win_manual:
+        return True
     return bool(get_backend_adapter(tool).get("manual_download"))
 
 
 def supports_auto_install(tool: ToolSpec) -> bool:
     adapter = get_backend_adapter(tool)
-    return bool(adapter.get("auto_install")) and bool(tool.install_cmd)
+    return bool(adapter.get("auto_install")) and bool(get_install_command(tool))
 
 
 def install_tool(tool: ToolSpec) -> bool:
-    if not tool.install_cmd:
+    command = get_install_command(tool)
+    if not command:
         return True
     if should_manual_download(tool):
         return False
     if requires_backend_dependency(tool, "code") and not shutil.which("code"):
         warn("未找到 code 命令，无法自动安装 VS Code 插件")
         return False
-    command = tool.install_cmd
     if isinstance(command, tuple) and command and command[0] == "npm":
         npm_cache = cfg_path(".tokenplan-npm-cache")
         npm_cache.mkdir(parents=True, exist_ok=True)
@@ -637,17 +770,26 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
         ok(f"macOS {macos_version} ({architecture})")
         if architecture not in {"arm64", "x86_64"}:
             warn(f"未验证的 Mac 架构: {architecture}")
-    elif sys.platform != "win32":
+    elif IS_WINDOWS:
+        try:
+            win_ver = sys.getwindowsversion()  # type: ignore[attr-defined]
+            info(f"Windows {win_ver.major}.{win_ver.minor} (build {win_ver.build})")
+        except AttributeError:
+            info("Windows")
+    else:
         info(f"当前平台: {sys.platform}")
 
     needs_node = any(
         tool.backend in {"cli", "plugin"}
-        and tool.install_cmd
-        and any("npm" in part or "npx" in part for part in tool.install_cmd)
+        and get_install_command(tool)
+        and any("npm" in part or "npx" in part for part in (get_install_command(tool) or ("",)))
         for tool in selected_tools
     )
     needs_code = any(requires_backend_dependency(tool, "code") for tool in selected_tools)
-    needs_curl = any(requires_backend_dependency(tool, "curl") for tool in selected_tools)
+    needs_curl = (
+        not IS_WINDOWS
+        and any(requires_backend_dependency(tool, "curl") for tool in selected_tools)
+    )
     prerequisites_ready = True
     ok("Python 3")
 
@@ -822,6 +964,9 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
             "default": default_model,
         },
     )
+    if IS_WINDOWS:
+        install_claude_tokenplan_launcher_win(model_ids)
+        return
     launcher = cfg_path(".local", "bin", "claude-tokenplan")
     launcher.write_text(
         "#!/bin/sh\n"
@@ -1010,10 +1155,14 @@ def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
     backup_file(patch_path)
     patch_path.write_text("[]\n")
     info("DeepSeek Harness 已更新内置 pi-ai Provider 设置")
-    warn("若启动时提示 ~/.dsh/cordis.patch.yml 格式错误，可执行：")
-    info("rm ~/.dsh/cordis.patch.yml")
-    info("然后重新运行: npx @deepseek-ai/dsh web")
-    info("也可以保留文件并执行: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml")
+    warn("若启动时提示 cordis.patch.yml 格式错误，可执行：")
+    if IS_WINDOWS:
+        info(r"del %USERPROFILE%\.dsh\cordis.patch.yml")
+        info("然后重新运行: dsh web")
+    else:
+        info("rm ~/.dsh/cordis.patch.yml")
+        info("然后重新运行: dsh web")
+        info("也可以保留文件并执行: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml")
 
 
 CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
@@ -1209,13 +1358,18 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
         status = "已安装" if installed else "未安装"
         print(f"  {tool.name}: {status}")
         print(f"    配置位置: {tool.cfg_hint}")
-        if not installed and supports_auto_install(tool):
+        if not installed and should_manual_download(tool):
+            print("    将自动安装: 否（当前平台需手动安装）")
+            if tool.download_url:
+                print(f"    手动安装: {tool.download_url}")
+        elif not installed and supports_auto_install(tool):
             print("    将自动安装: 是")
-            if tool.install_cmd:
-                if isinstance(tool.install_cmd, tuple):
-                    print(f"    安装命令: {' '.join(tool.install_cmd)}")
+            command = get_install_command(tool)
+            if command:
+                if isinstance(command, tuple):
+                    print(f"    安装命令: {' '.join(command)}")
                 else:
-                    print(f"    安装命令: {tool.install_cmd}")
+                    print(f"    安装命令: {command}")
         elif not installed:
             print("    将自动安装: 否")
         print()
@@ -1223,6 +1377,7 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
 
 
 def main() -> None:
+    enable_windows_ansi()
     parser = build_arg_parser()
     args = parser.parse_args()
     selected_tools = resolve_tools_from_arg(args.tools)
@@ -1337,7 +1492,7 @@ def main() -> None:
                 failed.append((tool, "安装失败"))
                 print()
                 continue
-        elif not already_installed and tool.install_cmd:
+        elif not already_installed and get_install_command(tool):
             if repair_mode:
                 skipped.append(tool)
                 warn(f"{tool.name} 未检测到已安装状态，修复模式已跳过安装")

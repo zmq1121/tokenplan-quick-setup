@@ -21,11 +21,31 @@ chmod +x tokenplan-setup
 
 ---
 
+## Windows 用户
+
+双击 `setup.bat`（推荐），或在 cmd / PowerShell 中运行：
+
+```bat
+setup.bat
+setup.bat doctor
+```
+
+`setup.bat` 会自动完成：检测 Python（优先 py 启动器）→ 从多个镜像源下载主脚本（国内网络优先 jsDelivr CDN）→ 校验脚本内容 → 运行并透传参数。
+
+也可以直接用 Python 运行主脚本：
+
+```bat
+py -3 setup.command doctor
+```
+
+---
+
 ## 发给用户
 
 | 系统 | 发哪个文件 | 怎么用 |
 |------|-----------|--------|
 | Mac | `setup.command` | `bash setup.command` |
+| Windows | `setup.bat` | 双击运行 |
 
 微信/QQ/邮件直接发一个文件就行。
 
@@ -34,12 +54,13 @@ chmod +x tokenplan-setup
 - ✅ 自动检测已安装的 AI 工具
 - ✅ 自动下载安装 CLI 工具
 - ✅ 自动写入配置文件
-- ✅ 配置前自动备份原有配置
+- ✅ 配置前自动备份原有配置（含备份清单，支持后续还原）
 - ✅ API Key 实时验证
 - ✅ 进度条 + 旋转动画
-- ✅ 前置检查（Node.js、npm、curl、Mac 架构）
+- ✅ 前置检查（Node.js、npm、curl、Mac 架构、Windows 版本）
 - ✅ OpenClaw 和 OpenCode 自定义 Provider 配置
 - ✅ 完成后汇总报告
+- ✅ Windows 支持：npm 类工具自动安装、CodeBuddy 环境变量写入（setx）、claude-tokenplan.cmd 模型选择器
 
 ## macOS 使用前提
 
@@ -48,6 +69,17 @@ chmod +x tokenplan-setup
 - macOS 12 Monterey 或更高版本；
 - Python 3；
 - 网络连接和当前用户的文件写入权限；
+- 选择 CodeBuddy Code、Claude Code、OpenCode、OpenClaw 或 DeepSeek Harness 时，需要 Node.js LTS（包含 npm）；这些 CLI 工具若未安装，安装器会先尝试自动安装；
+- 选择 Hermes Agent 或 OpenClaw 时，需要 curl；
+
+## Windows 平台说明
+
+- 支持 Windows 10/11（老版本 cmd 已启用 VT100 颜色支持）；
+- 需要 Python 3（推荐通过 `winget install Python.Python.3.12` 安装并勾选 Add to PATH）；
+- npm 类工具（CodeBuddy Code、Claude Code、OpenCode、OpenClaw、DeepSeek Harness）在 Windows 上自动走 npm 安装；
+- Hermes Agent 在 Windows 上暂不支持自动安装（官方仅提供 curl | bash 安装脚本），安装器会提示官网地址，手动安装后重跑 `repair` 模式即可完成配置；
+- CodeBuddy 的 API Key 环境变量通过 `setx` 写入用户环境变量，需重新打开终端生效；
+- `claude-tokenplan` 模型选择器以 `.cmd` 形式写入 npm 全局目录（该目录默认已在 PATH 中）。
 - 选择 CodeBuddy Code、Claude Code、OpenCode、OpenClaw 或 DeepSeek Harness 时，需要 Node.js LTS（包含 npm）；这些 CLI 工具若未安装，安装器会先尝试自动安装；
 - 选择 Hermes Agent 或 OpenClaw 时，需要 curl；
 

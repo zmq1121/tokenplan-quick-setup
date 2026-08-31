@@ -155,6 +155,36 @@ def backup_file(path: Path) -> Optional[Path]:
     return backup
 
 
+STATE_PATH = BACKUP_DIR / "state.json"
+
+
+def load_state() -> Dict[str, list]:
+    if STATE_PATH.exists():
+        try:
+            data = json.loads(STATE_PATH.read_text())
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {"rc_blocks": [], "setx_keys": [], "files_written": [], "env_files": []}
+
+
+def save_state(state: Dict[str, list]) -> None:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+    )
+
+
+def record_state(kind: str, value: object) -> None:
+    """Track a side effect so `uninstall` can revert it precisely."""
+    state = load_state()
+    bucket = state.setdefault(kind, [])
+    if value not in bucket:
+        bucket.append(value)
+    save_state(state)
+
+
 def cfg_path(*parts: str) -> Path:
     p = HOME.joinpath(*parts)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -530,6 +560,24 @@ def get_npm_prefix_dir() -> Optional[Path]:
     return Path(prefix)
 
 
+def query_windows_user_env(key: str) -> Optional[str]:
+    """Best-effort read of a current-user env var from the registry."""
+    try:
+        result = subprocess.run(
+            ["reg", "query", "HKCU\\Environment", "/v", key],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if key in line:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        return " ".join(parts[2:])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
     """Provide CodeBuddy Code's documented API-key authentication path."""
     if IS_WINDOWS:
@@ -538,6 +586,8 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
             ("OPENAI_API_KEY", api_key),
             ("OPENAI_BASE_URL", base_url),
         ):
+            old_value = query_windows_user_env(key)
+            record_state("setx_keys", {"key": key, "old": old_value})
             os.environ[key] = value
             subprocess.run(["setx", key, value], capture_output=True, check=False)
         info("已写入 Windows 用户环境变量，重新打开终端后生效")
@@ -548,6 +598,7 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
         f"export OPENAI_API_KEY={json.dumps(api_key)}\n"
         f"export OPENAI_BASE_URL={json.dumps(base_url)}\n"
     )
+    record_state("env_files", str(env_path))
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
     marker = "# Token Plan CodeBuddy Code API-key authentication"
@@ -556,6 +607,7 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
     if marker not in existing:
         rc_path.parent.mkdir(parents=True, exist_ok=True)
         rc_path.write_text(existing.rstrip() + f"\n{marker}\n{source_line}\n")
+        record_state("rc_blocks", {"file": str(rc_path), "marker": marker})
     os.environ["CODEBUDDY_API_KEY"] = api_key
     os.environ["OPENAI_API_KEY"] = api_key
     os.environ["OPENAI_BASE_URL"] = base_url
@@ -573,6 +625,8 @@ def install_claude_tokenplan_path() -> None:
     if marker not in existing:
         rc_path.parent.mkdir(parents=True, exist_ok=True)
         rc_path.write_text(existing.rstrip() + f"\n{marker}\n{path_line}\n")
+        record_state("rc_blocks", {"file": str(rc_path), "marker": marker})
+    record_state("files_written", str(launcher_dir / "claude-tokenplan"))
     current_path = os.environ.get("PATH", "")
     if str(launcher_dir) not in current_path.split(":"):
         os.environ["PATH"] = f"{launcher_dir}:{current_path}"
@@ -616,6 +670,7 @@ def install_claude_tokenplan_launcher_win(model_ids: List[str]) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     launcher = target_dir / "claude-tokenplan.cmd"
     launcher.write_text(_claude_tokenplan_cmd(model_ids), encoding="utf-8")
+    record_state("files_written", str(launcher))
     if prefix:
         info(f"已写入模型选择器: {launcher}")
     else:
@@ -654,6 +709,7 @@ def ensure_npm_bin_on_path() -> None:
         rc_path.parent.mkdir(parents=True, exist_ok=True)
         block = f'\n{marker}\nexport PATH="{npm_bin}:$PATH"\n'
         rc_path.write_text(existing.rstrip() + block)
+        record_state("rc_blocks", {"file": str(rc_path), "marker": marker})
     info(f"npm 全局命令路径已加入: {npm_bin}")
 
 
@@ -1283,9 +1339,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("setup", "repair", "doctor"),
+        choices=("setup", "repair", "doctor", "uninstall"),
         default="setup",
-        help="setup=安装配置（默认），repair=仅修复已安装工具，doctor=仅检查环境",
+        help="setup=安装配置（默认），repair=仅修复已安装工具，doctor=仅检查环境，\nuninstall=还原配置并清理安装器写入的修改",
     )
     parser.add_argument(
         "--plan",
@@ -1305,6 +1361,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="尽量跳过确认提示（适合自动化）",
+    )
+    parser.add_argument(
+        "--verify-models",
+        dest="verify_models",
+        choices=("off", "default", "all"),
+        default="default",
+        help="配置完成后的端到端验证：off=关闭，default=只验默认模型，all=验证全部模型（默认 default）",
     )
     return parser
 
@@ -1376,6 +1439,227 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
     return 0
 
 
+def collect_latest_backups() -> Dict[str, str]:
+    """Group manifest entries by original path, keeping the newest backup."""
+    manifest = BACKUP_DIR / "manifest.jsonl"
+    newest: Dict[str, Tuple[str, str]] = {}  # original -> (ts, backup_name)
+    if not manifest.exists():
+        return {}
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        original = entry.get("original")
+        backup = entry.get("backup")
+        ts = entry.get("ts", "")
+        if not original or not backup:
+            continue
+        current = newest.get(original)
+        if current is None or ts >= current[0]:
+            newest[original] = (ts, backup)
+    return {original: backup for original, (_, backup) in newest.items()}
+
+
+def strip_rc_block(rc_path_str: str, marker: str) -> bool:
+    """Remove the marker line plus its single following line from an rc file."""
+    rc_path = Path(rc_path_str)
+    if not rc_path.exists() or not marker:
+        return False
+    lines = rc_path.read_text().splitlines()
+    if marker not in lines:
+        return False
+    out: List[str] = []
+    skip_next = False
+    for line in lines:
+        if skip_next:
+            skip_next = False
+            continue
+        if line.strip() == marker:
+            skip_next = True
+            continue
+        out.append(line)
+    rc_path.write_text("\n".join(out).rstrip() + "\n")
+    return True
+
+
+def run_uninstall(yes: bool) -> int:
+    clear()
+    print()
+    print("  ╔══════════════════════════════════════════════╗")
+    print("  ║        Token Plan 接入卸载 / 还原            ║")
+    print("  ╚══════════════════════════════════════════════╝")
+    print()
+    info("卸载范围：配置还原 + 安装器写入的文件/环境变量/PATH 修改")
+    warn("不会卸载工具本体（npm 包、CLI 程序不会被删除）")
+    print()
+
+    state = load_state()
+    latest = collect_latest_backups()
+    rc_blocks = state.get("rc_blocks", [])
+    files_written = state.get("files_written", [])
+    env_files = state.get("env_files", [])
+    setx_keys = state.get("setx_keys", [])
+
+    if not latest and not rc_blocks and not files_written and not env_files and not setx_keys:
+        warn("没有可还原的记录（~/.tokenplan-backups 为空或缺少清单）")
+        return 0
+
+    print(f"  可还原配置文件: {len(latest)} 个")
+    print(f"  可移除 rc 修改: {len(rc_blocks)} 处")
+    print(f"  可删除生成文件: {len(files_written) + len(env_files)} 个")
+    if IS_WINDOWS:
+        print(f"  可还原环境变量: {len(setx_keys)} 个")
+    print()
+
+    if not yes:
+        confirm = ask("  确认执行卸载还原？(y/n): ")
+        if confirm.lower() != "y":
+            print(f"\n  {YELLOW}已取消{RESET}")
+            return 0
+        print()
+
+    print("  ── 还原配置文件 ──")
+    print()
+    for original, backup_name in latest.items():
+        backup = BACKUP_DIR / backup_name
+        target = Path(original)
+        if backup.exists():
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, target)
+                ok(f"已还原: {original}")
+            except OSError as exc:
+                warn(f"还原失败: {original} ({exc})")
+        else:
+            warn(f"备份文件缺失，跳过: {backup_name}")
+    print()
+
+    if rc_blocks:
+        print("  ── 移除 rc 文件修改 ──")
+        print()
+        cleaned = 0
+        for block in rc_blocks:
+            if isinstance(block, dict) and strip_rc_block(block.get("file", ""), block.get("marker", "")):
+                cleaned += 1
+        if cleaned:
+            ok(f"已清理 {cleaned} 处 rc 修改")
+        else:
+            info("没有需要清理的 rc 修改")
+        print()
+
+    if files_written or env_files:
+        print("  ── 删除安装器生成的文件 ──")
+        print()
+        for path_str in list(files_written) + list(env_files):
+            p = Path(path_str)
+            if p.exists():
+                try:
+                    p.unlink()
+                    ok(f"已删除: {path_str}")
+                except OSError as exc:
+                    warn(f"删除失败: {path_str} ({exc})")
+        print()
+
+    if IS_WINDOWS and setx_keys:
+        print("  ── 还原 Windows 环境变量 ──")
+        print()
+        for item in setx_keys:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key", "")
+            old = item.get("old")
+            if old:
+                subprocess.run(["setx", key, old], capture_output=True, check=False)
+                ok(f"已还原原值: {key}")
+            else:
+                subprocess.run(
+                    ["reg", "delete", "HKCU\\Environment", "/v", key, "/f"],
+                    capture_output=True, check=False,
+                )
+                ok(f"已删除: {key}")
+        print()
+
+    print("  ── 完成 ──")
+    print()
+    info(f"备份目录保留在 {BACKUP_DIR}，确认无误后可手动删除")
+    return 0
+
+
+def fetch_remote_models(base_url: str, api_key: str) -> Optional[List[str]]:
+    """Fetch the model list from the OpenAI-compatible /models endpoint."""
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode(errors="ignore"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, list):
+            ids = [item.get("id") for item in data if isinstance(item, dict) and item.get("id")]
+            if ids:
+                return sorted(ids)
+    except Exception:
+        pass
+    return None
+
+
+def test_model(base_url: str, api_key: str, model: str) -> Tuple[bool, str]:
+    """Send a 1-token chat completion to verify a model end to end."""
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(
+                {
+                    "model": model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            ).encode(),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT)
+        return True, ""
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="ignore")[:120] if exc.fp else ""
+        return False, f"HTTP {exc.code}: {body}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def verify_models(
+    base_url: str, api_key: str, plan: PlanSpec, mode: str = "default"
+) -> Dict[str, Tuple[bool, str]]:
+    """End-to-end verification of the model IDs that were written to configs."""
+    catalog_ids = get_model_ids(plan.key)
+    default_model = str(get_model_catalog(plan.key)["default"])
+    if mode == "all":
+        targets = catalog_ids or [default_model]
+    else:
+        targets = [default_model]
+    print("  ── 端到端验证（真实调用 /chat/completions） ──")
+    print()
+    results: Dict[str, Tuple[bool, str]] = {}
+    for model in targets:
+        passed, reason = test_model(base_url, api_key, model)
+        results[model] = (passed, reason)
+        if passed:
+            ok(f"{model}")
+        else:
+            warn(f"{model} — {reason}")
+    print()
+    failed = [m for m, (p, _) in results.items() if not p]
+    if failed:
+        warn(f"{len(failed)} 个模型验证失败；配置仍已写入，请检查模型 ID 或套餐权限")
+    else:
+        ok(f"全部 {len(targets)} 个模型验证通过，配置立即可用")
+    print()
+    return results
+
+
 def main() -> None:
     enable_windows_ansi()
     parser = build_arg_parser()
@@ -1386,6 +1670,9 @@ def main() -> None:
     if args.command == "doctor":
         run_doctor(selected_tools)
         return
+    if args.command == "uninstall":
+        run_uninstall(args.yes)
+        return
 
     clear()
     print()
@@ -1394,7 +1681,7 @@ def main() -> None:
     print("  ║   只需 API Key，其余尽可能自动              ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
-    print("  命令: setup / repair / doctor")
+    print("  命令: setup / repair / doctor / uninstall")
     print("  默认: setup")
     print()
 
@@ -1422,6 +1709,16 @@ def main() -> None:
             return
     else:
         ok("API Key 验证通过")
+    print()
+
+    remote_models = fetch_remote_models(base_url, api_key)
+    if remote_models:
+        catalog_ids = get_model_ids(plan.key)
+        missing = [m for m in catalog_ids if m not in remote_models]
+        if missing:
+            warn(f"以下目录模型未出现在 API 模型列表中（可能已下线）: {', '.join(missing)}")
+        else:
+            ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
     print()
 
     repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())
@@ -1566,6 +1863,9 @@ def main() -> None:
         for model_line in models:
             print(f"    {model_line}")
         print()
+
+    if installed and args.verify_models != "off":
+        verify_models(base_url, api_key, plan, mode=args.verify_models)
 
 
 if __name__ == "__main__":

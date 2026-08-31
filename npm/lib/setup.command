@@ -235,6 +235,12 @@ def write_append_patch(path: Path, block: str) -> None:
 def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
     print(f"  {CYAN}→{RESET} {message}")
     print()
+    # Windows: npm/code etc. are .cmd shims that CreateProcess cannot launch
+    # directly without a shell; resolve and reroute through the string branch.
+    if isinstance(command, tuple) and IS_WINDOWS:
+        exe = shutil.which(command[0])
+        if exe and exe.lower().endswith((".cmd", ".bat")):
+            command = subprocess.list2cmdline(command)
     try:
         if isinstance(command, tuple):
             proc = subprocess.Popen(
@@ -488,6 +494,162 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "或保留文件: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml",
         ),
     ),
+    # ── 编程工具(编号 7-12) ───────────────────────────────────
+    ToolSpec(
+        key="codex",
+        name="Codex CLI",
+        backend="cli",
+        check_exe="codex",
+        install_cmd=("npm", "install", "-g", "@openai/codex"),
+        start_hint="codex",
+        cfg_hint="~/.codex/config.toml",
+        usage_lines=(
+            "终端输入: codex",
+            "切换模型: 会话中输入 /model，或编辑 ~/.codex/config.toml 的 model 字段",
+            "Token Plan 走 Responses 协议(wire_api = responses)，已自动配置",
+            "API Key 环境变量: TOKENPLAN_API_KEY",
+        ),
+    ),
+    ToolSpec(
+        key="kilo-cli",
+        name="Kilo CLI",
+        backend="cli",
+        check_exe="kilo",
+        install_cmd=("npm", "install", "-g", "@kilocode/cli"),
+        start_hint="kilo",
+        cfg_hint="~/.config/kilo/kilo.jsonc",
+        usage_lines=(
+            "终端输入: kilo",
+            "首次配置: 启动后输入 /connect，Provider 类型选 OpenAI Compatible",
+            "Base URL: {base_url}",
+            "API Key: {api_key_mask}（完整 Key 见上方汇总或控制台）",
+            "配置文件: ~/.config/kilo/kilo.jsonc（编辑后需重启 CLI）",
+            "切换模型: /connect 中选择已配置的 Provider 后指定模型",
+        ),
+    ),
+    ToolSpec(
+        key="kilo-code",
+        name="Kilo Code",
+        backend="plugin",
+        check_exe=None,
+        install_cmd=("code", "--install-extension", "kilocode.kilocode"),
+        start_hint="code",
+        cfg_hint="VS Code → Kilo Code → Settings → Providers",
+        usage_lines=(
+            "VS Code 扩展面板确认 Kilo Code 已安装",
+            "打开 Kilo Code 面板 → Settings(齿轮) → Providers → 新建 API Profile",
+            "Provider 类型选 OpenAI Compatible，Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写，保存后即可使用",
+        ),
+    ),
+    ToolSpec(
+        key="cline",
+        name="Cline",
+        backend="plugin",
+        check_exe=None,
+        install_cmd=("code", "--install-extension", "saoudrizwan.claude-dev"),
+        start_hint="code",
+        cfg_hint="Cline 侧边栏 → 设置 → API Provider",
+        usage_lines=(
+            "VS Code 扩展面板确认 Cline 已安装",
+            "打开 Cline 侧边栏 → 设置(齿轮) → API Provider",
+            "Provider 选 OpenAI Compatible，Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写",
+        ),
+    ),
+    ToolSpec(
+        key="cursor",
+        name="Cursor",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://cursor.com",
+        usage_lines=(
+            "下载安装: https://cursor.com",
+            "打开 Settings → Models → 开启 OpenAI API Key 覆盖(Override)",
+            "Base URL: {base_url}",
+            "填入 API Key 后即可在模型列表选择套餐模型",
+            "配置位置: Cursor Settings → Models",
+        ),
+    ),
+    ToolSpec(
+        key="trae",
+        name="TRAE",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://www.trae.cn",
+        usage_lines=(
+            "下载安装: https://www.trae.cn",
+            "打开 设置 → 模型服务，找到自定义模型/自定义 Provider 入口",
+            "接入地址(Base URL): {base_url}",
+            "API Key 与模型 ID 按套餐填写，入口名称以当前版本设置页为准",
+        ),
+    ),
+    # ── 龙虾工具(编号 13-17) ──────────────────────────────────
+    ToolSpec(
+        key="workbuddy",
+        name="WorkBuddy",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://workbuddy.qq.com",
+        usage_lines=(
+            "下载安装: https://workbuddy.qq.com（腾讯云 AI 桌面智能体）",
+            "在应用内 设置 → 模型/服务商 处添加自定义接入",
+            "Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写",
+        ),
+    ),
+    ToolSpec(
+        key="lighthouse-openclaw",
+        name="Lighthouse OpenClaw",
+        backend="deploy",
+        check_exe=None,
+        download_url="https://console.cloud.tencent.com/lighthouse",
+        usage_lines=(
+            "场景: 在腾讯云轻量应用服务器上部署 OpenClaw，随时随地远程访问",
+            "服务器购买/管理: https://console.cloud.tencent.com/lighthouse",
+            "服务器上运行本安装器并选择 OpenClaw，即可完成同样的自动配置",
+            "本地与服务器可共用同一个 Token Plan API Key",
+            "服务器端配置文件: ~/.openclaw/openclaw.json",
+        ),
+    ),
+    ToolSpec(
+        key="autoclaw",
+        name="AutoClaw",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://autoclaw.ai",
+        usage_lines=(
+            "下载安装: https://autoclaw.ai（本地 AI 智能体）",
+            "在应用内设置中添加自定义模型接入",
+            "Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写",
+        ),
+    ),
+    ToolSpec(
+        key="qclaw",
+        name="QClaw",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://qclaw.qq.com",
+        usage_lines=(
+            "下载安装: https://qclaw.qq.com（腾讯出品，微信远程办公 AI 助手）",
+            "在助手设置中添加自定义模型",
+            "Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写",
+        ),
+    ),
+    ToolSpec(
+        key="copaw",
+        name="CoPaw",
+        backend="desktop",
+        check_exe=None,
+        usage_lines=(
+            "开源 AI 智能体：获取渠道以项目官方发布为准",
+            "获得应用后，在设置中添加自定义 OpenAI Compatible 接入",
+            "Base URL: {base_url}",
+            "API Key 与模型 ID 按套餐填写",
+        ),
+    ),
 )
 
 
@@ -530,6 +692,15 @@ BACKEND_REGISTRY = {
         "usage_template": (
             "在 VS Code 中打开插件面板",
             "配置位置: {cfg_hint}",
+        ),
+    },
+    "deploy": {
+        "label": "部署场景",
+        "auto_install": False,
+        "manual_download": True,
+        "requires": (),
+        "usage_template": (
+            "本条目为云端部署场景，无需在本地安装应用",
         ),
     },
 }
@@ -1221,6 +1392,117 @@ def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
         info("也可以保留文件并执行: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml")
 
 
+def install_codex_shell_env(api_key: str) -> None:
+    """Expose TOKENPLAN_API_KEY to Codex via a sourced env file (or setx)."""
+    if IS_WINDOWS:
+        old_value = query_windows_user_env("TOKENPLAN_API_KEY")
+        record_state("setx_keys", {"key": "TOKENPLAN_API_KEY", "old": old_value})
+        os.environ["TOKENPLAN_API_KEY"] = api_key
+        subprocess.run(
+            ["setx", "TOKENPLAN_API_KEY", api_key], capture_output=True, check=False
+        )
+        info("已写入 Windows 用户环境变量 TOKENPLAN_API_KEY，重新打开终端后生效")
+        return
+    env_path = cfg_path(".codex", "tokenplan.env")
+    env_path.write_text(f"export TOKENPLAN_API_KEY={json.dumps(api_key)}\n")
+    record_state("env_files", str(env_path))
+    shell = os.environ.get("SHELL", "")
+    rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
+    marker = "# Token Plan Codex API key"
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    source_line = f'[ -f "{env_path}" ] && source "{env_path}"'
+    if marker not in existing:
+        rc_path.parent.mkdir(parents=True, exist_ok=True)
+        rc_path.write_text(existing.rstrip() + f"\n{marker}\n{source_line}\n")
+        record_state("rc_blocks", {"file": str(rc_path), "marker": marker})
+    os.environ["TOKENPLAN_API_KEY"] = api_key
+
+
+def _toml_upsert_root_key(lines: List[str], key: str, value: str) -> List[str]:
+    """Set a root-level TOML key (before the first table header), preserving the rest."""
+    rendered = f'{key} = "{value}"'
+    root_end = len(lines)
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("["):
+            root_end = i
+            break
+    for i in range(root_end):
+        stripped = lines[i].strip()
+        if stripped.startswith(f"{key} ") or stripped.startswith(f"{key}="):
+            lines[i] = rendered
+            return lines
+    lines.insert(root_end, rendered)
+    return lines
+
+
+def _toml_upsert_section(
+    lines: List[str], header: str, entries: Dict[str, str]
+) -> List[str]:
+    """Create or update a [table] section; unknown lines inside are preserved."""
+    rendered_entries = [f'{k} = "{v}"' for k, v in entries.items()]
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            start = i
+            break
+    if start is None:
+        block = ["", header, *rendered_entries]
+        return lines + block
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].lstrip().startswith("["):
+            end = i
+            break
+    section = lines[start + 1:end]
+    kept: List[str] = []
+    handled = set()
+    for line in section:
+        stripped = line.strip()
+        matched = False
+        for k, v in entries.items():
+            if stripped.startswith(f"{k} ") or stripped.startswith(f"{k}="):
+                if k not in handled:
+                    kept.append(f"{k} = \"{v}\"")
+                    handled.add(k)
+                matched = True
+                break
+        if not matched:
+            kept.append(line)
+    for k, v in entries.items():
+        if k not in handled:
+            kept.append(f"{k} = \"{v}\"")
+    return lines[:start + 1] + kept + lines[end:]
+
+
+def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Configure Codex CLI against the Token Plan Responses endpoint.
+
+    Codex only supports wire_api = "responses"; Token Plan exposes
+    /plan/v3/responses on every site (verified by endpoint probing).
+    """
+    config_path = cfg_path(".codex", "config.toml")
+    default_model = str(get_model_catalog(plan.key)["default"])
+    existing_lines = (
+        config_path.read_text().splitlines() if config_path.exists() else []
+    )
+    backup_file(config_path)
+    lines = _toml_upsert_root_key(existing_lines, "model_provider", "tokenplan")
+    lines = _toml_upsert_root_key(lines, "model", default_model)
+    lines = _toml_upsert_section(
+        lines,
+        "[model_providers.tokenplan]",
+        {
+            "name": "Tencent Cloud Token Plan",
+            "base_url": base_url,
+            "wire_api": "responses",
+            "env_key": "TOKENPLAN_API_KEY",
+        },
+    )
+    config_path.write_text("\n".join(lines).rstrip() + "\n")
+    install_codex_shell_env(api_key)
+    info(f"Codex 已配置: {config_path} (model = {default_model})")
+
+
 CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "codebuddy": configure_codebuddy,
     "claude-code": configure_claude_code,
@@ -1228,6 +1510,7 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "dsh": configure_dsh,
     "openclaw": configure_openclaw,
     "opencode": configure_opencode,
+    "codex": configure_codex,
 }
 
 
@@ -1286,12 +1569,19 @@ def choose_tools() -> List[ToolSpec]:
     print("  输入编号选择，空格分隔；直接回车 = 全部")
     print("  支持输入 all 或 * 选择全部，输入 none 取消选择")
     print()
+    group_marks = {
+        7: "── 编程工具 ──",
+        13: "── 龙虾工具 ──",
+    }
     for idx, tool in enumerate(TOOLS, start=1):
+        if idx in group_marks:
+            print(f"     {WHITE}{group_marks[idx]}{RESET}")
         adapter = get_backend_adapter(tool)
         tag = {
             "cli": f"{GREEN}自动安装{RESET}",
             "desktop": f"{YELLOW}需先下载{RESET}",
             "plugin": f"{CYAN}VS Code{RESET}",
+            "deploy": f"{WHITE}部署场景{RESET}",
         }.get(tool.backend, f"{WHITE}{adapter.get('label', tool.backend)}{RESET}")
         print(f"     [{idx}] {tool.name:26s} {tag}")
     print()
@@ -1422,7 +1712,10 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
         print(f"  {tool.name}: {status}")
         print(f"    配置位置: {tool.cfg_hint}")
         if not installed and should_manual_download(tool):
-            print("    将自动安装: 否（当前平台需手动安装）")
+            if tool.backend in {"desktop", "deploy"}:
+                print("    接入方式: 手动获取应用，运行 setup 查看分步引导")
+            else:
+                print("    将自动安装: 否（当前平台需手动安装）")
             if tool.download_url:
                 print(f"    手动安装: {tool.download_url}")
         elif not installed and supports_auto_install(tool):
@@ -1756,7 +2049,12 @@ def main() -> None:
             warn(f"请先下载 {tool.name}")
             if tool.download_url:
                 info(f"下载: {tool.download_url}")
-            info("下载安装后重新运行即可自动完成其余支持工具的配置")
+            if tool.backend in {"desktop", "deploy"}:
+                info("手动接入步骤:")
+                for line in render_usage_lines(tool, base_url, api_key):
+                    info(f"  {line}")
+            else:
+                info("下载安装后重新运行即可自动完成其余支持工具的配置")
             print()
             continue
 
@@ -1835,7 +2133,10 @@ def main() -> None:
     if skipped:
         print(f"  {YELLOW}📝 需手动下载 {len(skipped)} 个工具:{RESET}")
         for tool in skipped:
-            print(f"       {tool.name} — {tool.download_url or ''}")
+            print(f"       {tool.name} — {tool.download_url or '见使用说明'}")
+            if tool.backend in {"desktop", "deploy"}:
+                for line in render_usage_lines(tool, base_url, api_key):
+                    print(f"         {line}")
     if failed:
         print(f"  {YELLOW}❌ 失败 {len(failed)} 个工具:{RESET}")
         for tool, reason in failed:

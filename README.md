@@ -51,16 +51,41 @@ py -3 setup.command doctor
 
 ## 功能
 
-- ✅ 自动检测已安装的 AI 工具
+- ✅ 自动检测已安装的 AI 工具（17 个）
 - ✅ 自动下载安装 CLI 工具
 - ✅ 自动写入配置文件
 - ✅ 配置前自动备份原有配置（含备份清单，支持后续还原）
-- ✅ API Key 实时验证
+- ✅ API Key 实时验证 + 配置完成后的端到端模型验证
 - ✅ 进度条 + 旋转动画
 - ✅ 前置检查（Node.js、npm、curl、Mac 架构、Windows 版本）
 - ✅ OpenClaw 和 OpenCode 自定义 Provider 配置
 - ✅ 完成后汇总报告
 - ✅ Windows 支持：npm 类工具自动安装、CodeBuddy 环境变量写入（setx）、claude-tokenplan.cmd 模型选择器
+- ✅ 桌面应用分步接入引导（Base URL + API Key 逐步说明）
+
+## 支持的工具（17 个）
+
+| # | 工具 | 接入方式 |
+|---|------|---------|
+| 1 | Hermes Agent | 自动安装 + 自动配置 |
+| 2 | CodeBuddy Code | 自动安装 + 自动配置 |
+| 3 | Claude Code | 自动安装 + 自动配置 + 模型选择器 |
+| 4 | OpenCode | 自动安装 + 自动配置 |
+| 5 | OpenClaw | 自动安装 + 自动配置 |
+| 6 | DeepSeek Harness | 自动安装 + 自动配置 |
+| 7 | Codex CLI | 自动安装 + 自动配置（config.toml，Responses 协议） |
+| 8 | Kilo CLI | 自动安装 + /connect 引导配置 |
+| 9 | Kilo Code | VS Code 插件自动安装 + Provider 引导 |
+| 10 | Cline | VS Code 插件自动安装 + Provider 引导 |
+| 11 | Cursor | 手动下载 + Settings→Models 分步引导 |
+| 12 | TRAE | 手动下载 + 自定义模型分步引导 |
+| 13 | WorkBuddy | 手动下载 + 自定义接入引导 |
+| 14 | Lighthouse OpenClaw | 云端部署场景引导（轻量应用服务器） |
+| 15 | AutoClaw | 手动下载 + 自定义接入引导 |
+| 16 | QClaw | 手动下载 + 自定义接入引导 |
+| 17 | CoPaw | 手动获取 + 自定义接入引导 |
+
+编号 1-6 为已验证工具，配置行为与旧版本完全一致。
 
 ## macOS 使用前提
 

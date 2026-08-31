@@ -1,0 +1,29 @@
+{
+  "name": "tokenplan-setup",
+  "version": "0.1.0",
+  "description": "腾讯云 Token Plan 一键接入 CLI —— npx tokenplan-setup 即用",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zmq1121/tokenplan-quick-setup"
+  },
+  "bin": {
+    "tokenplan-setup": "bin/tokenplan-setup.js"
+  },
+  "files": [
+    "bin/",
+    "lib/setup.command",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "tencent",
+    "tokenplan",
+    "maas",
+    "setup",
+    "claude-code",
+    "opencode"
+  ]
+}

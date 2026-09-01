@@ -11,7 +11,6 @@ exec 加载它(禁用 main 入口),与真实运行路径一致,不复制代码�
 import contextlib
 import io
 import json
-import os
 import re
 import subprocess
 import sys
@@ -181,7 +180,7 @@ def test_uninstall():
     check("卸载: 备份目录保留", mod.BACKUP_DIR.exists())
 
     # 空环境安全
-    empty = sandbox(mod)
+    sandbox(mod)
     with contextlib.redirect_stdout(io.StringIO()):
         code = mod.run_uninstall(yes=True)
     check("卸载: 空环境正常退出", code == 0)
@@ -307,6 +306,17 @@ def test_repo_consistency():
                        capture_output=True, text=True)
     check("--version 可用", r.returncode == 0 and "tokenplan-setup" in (r.stdout + r.stderr))
 
+    # setup.bat 规范:CRLF 行尾 + UTF-8 + chcp 65001(cmd 解析稳定性要求)
+    bat = (REPO / "setup.bat").read_bytes()
+    lf_only = bat.replace(b"\r\n", b"").count(b"\n")
+    crlf = bat.count(b"\r\n")
+    check("setup.bat: CRLF 行尾", crlf > 0 and lf_only == 0)
+    check("setup.bat: UTF-8 可解码", bat.decode("utf-8") is not None)
+    check("setup.bat: chcp 65001 存在", b"chcp 65001" in bat)
+
+    # LICENSE 必须存在(公开发布前提)
+    check("LICENSE 存在", (REPO / "LICENSE").exists())
+
 
 # ---------------------------------------------------------------------------
 
@@ -315,7 +325,6 @@ def test_repo_consistency():
 
 def test_remote_catalog():
     mod = load_module()
-    plan_pro = mod.PLAN_CATALOG["3"]
 
     # 回退:未刷新时用内置
     cat = mod.get_model_catalog("enterprise-pro")

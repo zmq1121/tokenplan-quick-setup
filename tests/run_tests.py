@@ -11,6 +11,7 @@ exec 加载它(禁用 main 入口),与真实运行路径一致,不复制代码�
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -139,7 +140,13 @@ def test_codex_config():
     text = cfg.read_text()
     check("Codex: config.toml 生成", cfg.exists())
     check("Codex: wire_api=responses", 'wire_api = "responses"' in text)
-    check("Codex: env 文件权限 600", (tmp / ".codex" / "tokenplan.env").stat().st_mode & 0o777 == 0o600)
+    if sys.platform == "win32":
+        # Windows 设计:走 setx 用户环境变量,不写 env 文件
+        check("Codex: Windows 注入 TOKENPLAN_API_KEY",
+              os.environ.get("TOKENPLAN_API_KEY") == key)
+    else:
+        check("Codex: env 文件权限 600",
+              (tmp / ".codex" / "tokenplan.env").stat().st_mode & 0o777 == 0o600)
 
     # 保留用户已有配置
     cfg.write_text('model = "gpt-5"\n\n[model_providers.openai]\nname = "OpenAI"\nbase_url = "https://api.openai.com/v1"\n')
@@ -203,10 +210,15 @@ def test_permissions():
     tmp = sandbox(mod)
     p = tmp / "x" / "models.json"
     mod.write_json(p, {"apiKey": "sk-xxx"})
-    check("write_json: 0o600", p.stat().st_mode & 0o777 == 0o600)
     e = tmp / "x" / ".env"
     mod.write_env(e, TOKEN="sk-xxx")
-    check("write_env: 0o600", e.stat().st_mode & 0o777 == 0o600)
+    if sys.platform == "win32":
+        # NTFS 无 POSIX 权限位;Windows 契约 = 文件生成且 _harden 不抛错
+        check("write_json: 文件生成(Windows 无 POSIX 位)", p.exists())
+        check("write_env: 文件生成(Windows 无 POSIX 位)", e.exists())
+    else:
+        check("write_json: 0o600", p.stat().st_mode & 0o777 == 0o600)
+        check("write_env: 0o600", e.stat().st_mode & 0o777 == 0o600)
 
 
 # ---------------------------------------------------------------------------

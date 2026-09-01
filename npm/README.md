@@ -8,6 +8,7 @@
 npx tokenplan-setup            # 交互式安装
 npx tokenplan-setup doctor     # 环境诊断（只读）
 npx tokenplan-setup uninstall  # 还原配置
+npx tokenplan-setup --version     # 查看版本
 ```
 
 ## 工作原理
@@ -22,10 +23,10 @@ npm 包内只有两个东西：
 ## 构建与发布
 
 ```bash
-cd npm
-cp ../setup.command lib/setup.command   # 同步主脚本
-npm pack                                # 本地验证
-npm publish                             # 发布（需先在 npmjs.com 注册包名）
+python3 tests/run_tests.py              # 1. 先跑回归(含 npm/lib 一致性校验)
+python3 scripts/sync_npm_lib.py         # 2. 同步主脚本到 npm/lib
+cd npm && npm pack                      # 3. 本地验证打包内容
+npm publish                             # 4. 发布（需先在 npmjs.com 注册包名）
 ```
 
 发布前务必执行 `cp ../setup.command lib/setup.command`，确保 `lib/` 里是最新主脚本。

@@ -35,6 +35,7 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 def clear() -> None:
+    """Clear the terminal (cls on Windows, ANSI reset elsewhere)."""
     if IS_WINDOWS:
         os.system("cls")
         return
@@ -42,26 +43,32 @@ def clear() -> None:
 
 
 def ok(msg: str) -> None:
+    """Print a green success line."""
     print(f"  {GREEN}✓{RESET} {msg}")
 
 
 def warn(msg: str) -> None:
+    """Print a yellow warning line."""
     print(f"  {YELLOW}⚠{RESET}  {msg}")
 
 
 def info(msg: str) -> None:
+    """Print a blue informational line."""
     print(f"  {BLUE}→{RESET} {msg}")
 
 
 def dim(msg: str) -> None:
+    """Print a plain neutral line."""
     print(f"  {WHITE}{msg}{RESET}")
 
 
 def ask(msg: str) -> str:
+    """Prompt for input, stripped of whitespace."""
     return input(f"  {msg}").strip()
 
 
 def mask_secret(secret: str, visible: int = 4) -> str:
+    """Mask a secret for display, keeping only the first `visible` chars."""
     if not secret:
         return ""
     if len(secret) <= visible:
@@ -70,6 +77,8 @@ def mask_secret(secret: str, visible: int = 4) -> str:
 
 
 class Spinner:
+    """Terminal spinner with tty detection and CJK-safe line erasing."""
+
     def __init__(self, msg: str):
         self.msg = msg
         self.running = False
@@ -80,6 +89,7 @@ class Spinner:
         self.tty = bool(sys.stdout.isatty())
 
     def _spin(self) -> None:
+        """Animation loop; skipped entirely when stdout is not a tty."""
         if not self.tty:
             return
         frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -91,11 +101,13 @@ class Spinner:
             i += 1
 
     def start(self) -> None:
+        """Start the spinner thread."""
         self.running = True
         self.thread = threading.Thread(target=self._spin, daemon=True)
         self.thread.start()
 
     def stop(self, success: bool = True) -> None:
+        """Stop the spinner, erase the line with ANSI \x1b[K, print the final status."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=0.3)
@@ -126,6 +138,8 @@ def enable_windows_ansi() -> None:
 
 @dataclass(frozen=True)
 class PlanSpec:
+    """A Token Plan product tier: display info plus its API base URL and key console URL."""
+
     choice: str
     key: str
     display_name: str
@@ -136,6 +150,8 @@ class PlanSpec:
 
 @dataclass(frozen=True)
 class ToolSpec:
+    """Declarative registry entry: install command, config location, usage guidance."""
+
     key: str
     name: str
     backend: str
@@ -150,6 +166,7 @@ class ToolSpec:
 
 
 def backup_file(path: Path) -> Optional[Path]:
+    """Copy path to ~/.tokenplan-backups with a timestamp and append to manifest.jsonl."""
     if not path.exists():
         return None
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -167,6 +184,7 @@ STATE_PATH = BACKUP_DIR / "state.json"
 
 
 def load_state() -> Dict[str, list]:
+    """Load the side-effect ledger (rc blocks, env files, setx keys) for uninstall."""
     if STATE_PATH.exists():
         try:
             data = json.loads(STATE_PATH.read_text())
@@ -178,6 +196,7 @@ def load_state() -> Dict[str, list]:
 
 
 def save_state(state: Dict[str, list]) -> None:
+    """Persist the side-effect ledger to state.json."""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(
         json.dumps(state, ensure_ascii=False, indent=2) + "\n"
@@ -194,6 +213,7 @@ def record_state(kind: str, value: object) -> None:
 
 
 def cfg_path(*parts: str) -> Path:
+    """Resolve a path under HOME (creating parent dirs) for config files."""
     p = HOME.joinpath(*parts)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
@@ -208,6 +228,7 @@ def _harden(path: Path) -> None:
 
 
 def write_json(path: Path, data: object, merge: bool = False) -> None:
+    """Backup then write JSON; merge=True shallow-merges into existing dicts. Hardens to 0o600."""
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if merge and path.exists():
@@ -223,6 +244,7 @@ def write_json(path: Path, data: object, merge: bool = False) -> None:
 
 
 def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
+    """Backup then rewrite a dotenv file, replacing only managed keys. Hardens to 0o600."""
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     old_lines = path.read_text().splitlines() if path.exists() else []
@@ -238,6 +260,7 @@ def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
 
 
 def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
+    """Run an install command, streaming output; returns success."""
     print(f"  {CYAN}→{RESET} {message}")
     print()
     # Windows: npm/code etc. are .cmd shims that CreateProcess cannot launch
@@ -711,6 +734,7 @@ BACKEND_REGISTRY = {
 }
 
 def get_backend_adapter(tool: ToolSpec) -> Dict[str, object]:
+    """Look up the backend adapter config, defaulting to a generic one."""
     return BACKEND_REGISTRY.get(tool.backend, {
         "label": tool.backend,
         "auto_install": False,
@@ -897,6 +921,7 @@ PLUGIN_EXTENSION_IDS = {
 
 
 def is_tool_installed(tool: ToolSpec) -> bool:
+    """Detect installation: shutil.which for CLI, code --list-extensions for plugins."""
     if tool.backend == "plugin":
         code = shutil.which("code")
         extension_id = PLUGIN_EXTENSION_IDS.get(tool.key)
@@ -918,6 +943,7 @@ def is_tool_installed(tool: ToolSpec) -> bool:
 
 
 def requires_backend_dependency(tool: ToolSpec, dependency: str) -> bool:
+    """True if the backend adapter or TOOL_DEPENDENCY_REGISTRY requires it."""
     adapter = get_backend_adapter(tool)
     if dependency in adapter.get("requires", ()):
         return True
@@ -942,17 +968,20 @@ def get_install_command(tool: ToolSpec) -> Optional[Union[Tuple[str, ...], str]]
 
 
 def should_manual_download(tool: ToolSpec) -> bool:
+    """True when the user must fetch the app manually (platform or backend)."""
     if IS_WINDOWS and tool.win_manual:
         return True
     return bool(get_backend_adapter(tool).get("manual_download"))
 
 
 def supports_auto_install(tool: ToolSpec) -> bool:
+    """True when the backend allows auto-install and a command is available."""
     adapter = get_backend_adapter(tool)
     return bool(adapter.get("auto_install")) and bool(get_install_command(tool))
 
 
 def install_tool(tool: ToolSpec) -> bool:
+    """Run the install command (npm gets a private cache; .cmd shims rerouted on Windows)."""
     command = get_install_command(tool)
     if not command:
         return True
@@ -969,6 +998,7 @@ def install_tool(tool: ToolSpec) -> bool:
 
 
 def render_usage_lines(tool: ToolSpec, base_url: str, api_key: str) -> List[str]:
+    """Render backend template + tool usage_lines, filling base_url/api_key placeholders."""
     rendered: List[str] = []
     adapter = get_backend_adapter(tool)
     template_lines = adapter.get("usage_template", ())
@@ -988,6 +1018,7 @@ def render_usage_lines(tool: ToolSpec, base_url: str, api_key: str) -> List[str]
 
 
 def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
+    """Check OS/Node/npm/npx/code/curl for the selected tools; returns readiness."""
     print("  ── 前置检查 ──")
     print()
 
@@ -1101,6 +1132,7 @@ def refresh_remote_catalog() -> None:
 
 
 def get_model_catalog(plan_key: str) -> Dict[str, object]:
+    """Remote catalog first (when refreshed), built-in MODEL_CATALOG as fallback."""
     remote = (_REMOTE_CATALOG or {}).get(plan_key)
     if isinstance(remote, dict) and remote.get("default") and remote.get("display"):
         return remote
@@ -1140,6 +1172,7 @@ def _format_api_error(body: str, limit: int = 160) -> str:
 
 
 def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
+    """Probe the endpoint with a 1-token chat completion using the plan's default model."""
     spinner = Spinner("验证 API Key...")
     spinner.start()
     try:
@@ -1170,6 +1203,7 @@ def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
 
 
 def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.codebuddy/models.json (per-model provider entries)."""
     model_ids = get_model_ids(plan.key)
     default_model = str(get_model_catalog(plan.key)["default"])
     write_json(
@@ -1203,6 +1237,7 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.claude/settings.json env block + model slots + tokenplan launcher."""
     anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
     catalog = get_model_catalog(plan.key)
     default_model = str(catalog["default"])
@@ -1268,6 +1303,7 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def patch_hermes_model_routing() -> None:
+    """Patch Hermes' model_switch.py so custom providers resolve their own slug."""
     install_dir = Path.home() / ".hermes" / "hermes-agent"
     target = install_dir / "hermes_cli" / "model_switch.py"
     if not target.exists():
@@ -1283,6 +1319,7 @@ def patch_hermes_model_routing() -> None:
 
 
 def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.hermes/.env custom provider and patch model routing."""
     patch_hermes_model_routing()
     write_env(
         cfg_path(".hermes", ".env"),
@@ -1318,6 +1355,7 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def get_openai_compatible_default_model(plan_key: str) -> str:
+    """Resolve 'auto' defaults to a concrete preferred model for tools that need one."""
     catalog = get_model_catalog(plan_key)
     default_model = str(catalog["default"])
     if default_model != "auto":
@@ -1331,6 +1369,7 @@ def get_openai_compatible_default_model(plan_key: str) -> str:
 
 
 def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.openclaw/openclaw.json provider and .env key."""
     model_ids = get_model_ids(plan.key)
     default_model = get_openai_compatible_default_model(plan.key)
     config_path = cfg_path(".openclaw", "openclaw.json")
@@ -1376,6 +1415,7 @@ def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.config/opencode/opencode.json provider entry."""
     model_ids = get_model_ids(plan.key)
     default_model = get_openai_compatible_default_model(plan.key)
     config_dir = cfg_path(".config", "opencode")
@@ -1406,6 +1446,7 @@ def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write ~/.dsh/settings.yaml pi-ai provider and credentials."""
     settings_path = cfg_path(".dsh", "settings.yaml")
     credentials_path = cfg_path(".dsh", ".credentials.yaml")
     patch_path = cfg_path(".dsh", "cordis.patch.yml")
@@ -1571,12 +1612,14 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
 
 
 def configure_tool(tool: ToolSpec, base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Dispatch to the tool's configurator if one is registered."""
     configurator = CONFIGURATOR_REGISTRY.get(tool.key)
     if configurator:
         configurator(base_url, api_key, plan)
 
 
 def choose_plan() -> PlanSpec:
+    """Interactive plan selection (第一步); EOF without --plan is an error."""
     while True:
         print("  ── 第一步：选择套餐 ──")
         print()
@@ -1602,6 +1645,7 @@ def choose_plan() -> PlanSpec:
 
 
 def choose_run_mode() -> bool:
+    """Interactive mode selection (第三步); EOF defaults to standard."""
     print("  ── 第三步：选择运行模式 ──")
     print()
     print("  [1] 标准安装 / 补全配置（推荐）")
@@ -1631,6 +1675,7 @@ def choose_run_mode() -> bool:
 
 
 def choose_tools() -> List[ToolSpec]:
+    """Interactive tool selection menu (第四步); EOF/empty selects all."""
     print("  ── 第四步：选择工具 ──")
     print()
     print("  输入编号选择，空格分隔；直接回车 = 全部")
@@ -1686,6 +1731,7 @@ def choose_tools() -> List[ToolSpec]:
 
 
 def print_usage(tool: ToolSpec, base_url: str, api_key: str) -> None:
+    """Print one tool's usage block in the final summary."""
     print(f"  {tool.name}:")
     for line in render_usage_lines(tool, base_url, api_key):
         print(f"    {line}")
@@ -1693,6 +1739,7 @@ def print_usage(tool: ToolSpec, base_url: str, api_key: str) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the argparse CLI (subcommands, plan/key/tools/yes/verify-models)."""
     parser = argparse.ArgumentParser(
         prog="tokenplan-setup",
         description="腾讯云 Token Plan 一键接入 CLI",
@@ -1741,6 +1788,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def resolve_plan_from_arg(plan_key: Optional[str]) -> Optional[PlanSpec]:
+    """Map --plan value (key or choice number) to a PlanSpec."""
     if not plan_key:
         return None
     for item in PLAN_CATALOG.values():
@@ -1750,6 +1798,7 @@ def resolve_plan_from_arg(plan_key: Optional[str]) -> Optional[PlanSpec]:
 
 
 def resolve_tools_from_arg(raw: Optional[str]) -> Optional[List[ToolSpec]]:
+    """Parse --tools (indices or keys, comma/space) into ToolSpec list."""
     if raw is None:
         return None
     tokens = raw.replace(",", " ").split()
@@ -1774,6 +1823,7 @@ def resolve_tools_from_arg(raw: Optional[str]) -> Optional[List[ToolSpec]]:
 
 
 def run_doctor(selected_tools: List[ToolSpec]) -> int:
+    """Read-only diagnosis: prerequisites plus per-tool install status."""
     clear()
     print()
     print("  ╔══════════════════════════════════════════════╗")
@@ -1855,6 +1905,7 @@ def strip_rc_block(rc_path_str: str, marker: str) -> bool:
 
 
 def run_uninstall(yes: bool) -> int:
+    """Restore backups, strip rc blocks, remove generated files and env vars."""
     clear()
     print()
     print("  ╔══════════════════════════════════════════════╗")
@@ -2032,6 +2083,7 @@ def verify_models(
 
 
 def main() -> None:
+    """CLI entry: parse args, verify key, install and configure selected tools."""
     enable_windows_ansi()
     parser = build_arg_parser()
     args = parser.parse_args()

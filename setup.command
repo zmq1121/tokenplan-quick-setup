@@ -73,8 +73,14 @@ class Spinner:
         self.msg = msg
         self.running = False
         self.thread = None
+        # CJK characters are double-width, so clearing by character count
+        # never fully erases the line; use ANSI \x1b[K instead, and skip
+        # animation entirely when stdout is not a terminal (pipes/logs).
+        self.tty = bool(sys.stdout.isatty())
 
     def _spin(self) -> None:
+        if not self.tty:
+            return
         frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         i = 0
         while self.running:
@@ -92,8 +98,9 @@ class Spinner:
         self.running = False
         if self.thread:
             self.thread.join(timeout=0.3)
-        sys.stdout.write("\r" + " " * (len(self.msg) + 12) + "\r")
-        sys.stdout.flush()
+        if self.tty:
+            sys.stdout.write("\r\x1b[K")
+            sys.stdout.flush()
         if success:
             ok(self.msg)
         else:
@@ -1085,6 +1092,25 @@ def get_model_ids(plan_key: str) -> List[str]:
     return result
 
 
+def _format_api_error(body: str, limit: int = 160) -> str:
+    """Humanize an API error body: prefer the JSON message field, truncate cleanly."""
+    msg = body.strip()
+    try:
+        payload = json.loads(body)
+        if isinstance(payload, dict):
+            err = payload.get("error")
+            if isinstance(err, dict):
+                msg = str(err.get("message") or msg)
+                code = err.get("code")
+                if code:
+                    msg = f"[{code}] {msg}"
+    except ValueError:
+        pass
+    if len(msg) > limit:
+        msg = msg[: limit - 1].rstrip() + "…"
+    return msg
+
+
 def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
     spinner = Spinner("验证 API Key...")
     spinner.start()
@@ -1106,8 +1132,8 @@ def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
         return True
     except urllib.error.HTTPError as exc:
         spinner.stop(success=False)
-        body = exc.read().decode(errors="ignore")[:200] if exc.fp else ""
-        warn(f"API 返回错误 [{exc.code}]: {body}")
+        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
+        warn(f"API 返回错误 [{exc.code}]: {_format_api_error(body)}")
         return False
     except Exception as exc:
         spinner.stop(success=False)
@@ -1527,7 +1553,12 @@ def choose_plan() -> PlanSpec:
         for item in PLAN_CATALOG.values():
             print(f"     [{item.choice}] {item.display_name}")
         print()
-        choice = ask("  请输入数字 (1-4): ")
+        try:
+            choice = ask("  请输入数字 (1-4): ")
+        except EOFError:
+            print()
+            print(f"  {YELLOW}❌ 非交互环境无法选择套餐，请用 --plan 指定（如 --plan enterprise-pro）{RESET}")
+            raise SystemExit(1)
         plan = PLAN_CATALOG.get(choice)
         if plan:
             print()
@@ -1547,7 +1578,13 @@ def choose_run_mode() -> bool:
     print("  [2] 仅修复已有安装的配置")
     print()
     while True:
-        choice = ask("  请输入数字 (1-2): ")
+        try:
+            choice = ask("  请输入数字 (1-2): ")
+        except EOFError:
+            print()
+            info("（无输入，默认: 标准安装 / 补全配置）")
+            print()
+            return False
         if choice == "1" or choice == "":
             print()
             ok("已选择: 标准安装 / 补全配置")
@@ -1587,7 +1624,12 @@ def choose_tools() -> List[ToolSpec]:
     print()
 
     while True:
-        raw = ask("  > ")
+        try:
+            raw = ask("  > ")
+        except EOFError:
+            info("（无输入，默认选择全部工具）")
+            print()
+            return list(TOOLS)
         if not raw:
             return list(TOOLS)
         tokens = raw.replace(",", " ").split()
@@ -1917,8 +1959,8 @@ def test_model(base_url: str, api_key: str, model: str) -> Tuple[bool, str]:
         urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT)
         return True, ""
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="ignore")[:120] if exc.fp else ""
-        return False, f"HTTP {exc.code}: {body}"
+        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
+        return False, f"HTTP {exc.code}: {_format_api_error(body, limit=100)}"
     except Exception as exc:
         return False, str(exc)
 
@@ -1957,11 +1999,11 @@ def main() -> None:
     enable_windows_ansi()
     parser = build_arg_parser()
     args = parser.parse_args()
-    selected_tools = resolve_tools_from_arg(args.tools)
-    if selected_tools is None:
-        selected_tools = list(TOOLS)
     if args.command == "doctor":
-        run_doctor(selected_tools)
+        doctor_tools = resolve_tools_from_arg(args.tools)
+        if doctor_tools is None:
+            doctor_tools = list(TOOLS)
+        run_doctor(doctor_tools)
         return
     if args.command == "uninstall":
         run_uninstall(args.yes)
@@ -1988,17 +2030,34 @@ def main() -> None:
     print()
     info("建议使用有权限的完整 API Key，粘贴时请避免前后空格")
     print()
-    api_key = args.api_key.strip() if args.api_key else ask("  请粘贴 API Key: ")
-    api_key = api_key.strip()
-    if len(api_key) < 10:
-        print(f"\n  {YELLOW}❌ API Key 无效，请重新运行。{RESET}")
+    api_key = args.api_key.strip() if args.api_key else ""
+    if api_key and len(api_key) < 10:
+        print(f"\n  {YELLOW}❌ --api-key 传入的 Key 无效（长度过短），请检查后重试。{RESET}")
         return
+    while not api_key:
+        try:
+            api_key = ask("  请粘贴 API Key: ").strip()
+        except EOFError:
+            print(f"\n  {YELLOW}未输入 API Key，已取消。{RESET}")
+            return
+        if not api_key:
+            print(f"\n  {YELLOW}未输入 API Key，已取消。{RESET}")
+            return
+        if len(api_key) < 10:
+            warn("API Key 看起来不完整（长度过短），请重新粘贴完整 Key")
+            print()
+            api_key = ""
+            continue
     print()
 
     if not verify_api_key(base_url, api_key, plan):
         warn("API Key 验证失败，请检查 Key 是否正确")
         print()
-        if not args.yes and ask("  是否继续？(y/n): ").lower() != "y":
+        try:
+            confirmed = ask("  是否继续？(y/n): ").lower()
+        except EOFError:
+            confirmed = "n"
+        if not args.yes and confirmed != "y":
             return
     else:
         ok("API Key 验证通过")
@@ -2015,6 +2074,11 @@ def main() -> None:
     print()
 
     repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())
+
+    selected_tools = resolve_tools_from_arg(args.tools)
+    if selected_tools is None:
+        # choose_tools handles EOF (non-interactive) by defaulting to all.
+        selected_tools = choose_tools()
     if not selected_tools:
         warn("未选择任何工具，脚本已结束")
         return
@@ -2145,6 +2209,10 @@ def main() -> None:
         backups = list(BACKUP_DIR.glob("*.bak"))
         if backups:
             print(f"  {WHITE}💾 原有配置已备份到: {BACKUP_DIR}{RESET}")
+    if load_state().get("rc_blocks"):
+        shell = os.environ.get("SHELL", "")
+        rc_name = ".zshrc" if shell.endswith("/zsh") else ".bashrc"
+        print(f"  {WHITE}💡 新装命令在新开终端中生效；当前终端可先执行: source ~/{rc_name}{RESET}")
     print()
     print("  ── 如何使用 ──")
     print()

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
+VERSION = "1.0.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -198,6 +199,14 @@ def cfg_path(*parts: str) -> Path:
     return p
 
 
+def _harden(path: Path) -> None:
+    """Owner-only permissions for files that carry API keys."""
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def write_json(path: Path, data: object, merge: bool = False) -> None:
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,6 +219,7 @@ def write_json(path: Path, data: object, merge: bool = False) -> None:
             existing.update(data)
             data = existing
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    _harden(path)
 
 
 def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
@@ -224,19 +234,7 @@ def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
     for key, value in kv.items():
         keep_lines.append(f"{key}={value}")
     path.write_text("\n".join(line for line in keep_lines if line.strip()) + "\n")
-
-
-def write_append_patch(path: Path, block: str) -> None:
-    backup_file(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text() if path.exists() else ""
-    if "id: tokenplan" in existing or "tokenplan-quick-setup" in existing:
-        return
-    content = existing.rstrip()
-    if content:
-        content += "\n\n"
-    content += block.strip() + "\n"
-    path.write_text(content)
+    _harden(path)
 
 
 def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
@@ -776,6 +774,7 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
         f"export OPENAI_API_KEY={json.dumps(api_key)}\n"
         f"export OPENAI_BASE_URL={json.dumps(base_url)}\n"
     )
+    _harden(env_path)
     record_state("env_files", str(env_path))
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
@@ -1046,8 +1045,10 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
             warn("未安装 npm，Node 工具安装可能失败")
         if npx_ok:
             ok("npx")
-        elif any(requires_backend_dependency(tool, "npx") for tool in selected_tools):
-            warn("未安装 npx，DeepSeek Harness 将无法启动")
+        else:
+            npx_tools = [t.name for t in selected_tools if requires_backend_dependency(t, "npx")]
+            if npx_tools:
+                warn(f"未安装 npx，{('、'.join(npx_tools))} 将无法启动")
         if not node_ok or not npm_ok:
             prerequisites_ready = False
             warn("当前环境缺少 Node 依赖，所选 Node 工具无法安装")
@@ -1075,7 +1076,34 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
     return prerequisites_ready
 
 
+# 远程模型目录:优先于内置 MODEL_CATALOG,由 refresh_remote_catalog() 填充。
+# 仓库根目录的 models.json 通过 jsDelivr CDN 分发,更新模型只需提交一次 JSON。
+REMOTE_CATALOG_URL = (
+    "https://cdn.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@main/models.json"
+)
+_REMOTE_CATALOG: Optional[Dict[str, Dict[str, object]]] = None
+
+
+def refresh_remote_catalog() -> None:
+    """Fetch the remote model catalog; keep built-in catalog on any failure."""
+    global _REMOTE_CATALOG
+    try:
+        req = urllib.request.Request(
+            REMOTE_CATALOG_URL, headers={"User-Agent": f"tokenplan-setup/{VERSION}"}
+        )
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode(errors="ignore"))
+        plans = payload.get("plans") if isinstance(payload, dict) else None
+        if isinstance(plans, dict) and plans:
+            _REMOTE_CATALOG = plans
+    except Exception:
+        pass
+
+
 def get_model_catalog(plan_key: str) -> Dict[str, object]:
+    remote = (_REMOTE_CATALOG or {}).get(plan_key)
+    if isinstance(remote, dict) and remote.get("default") and remote.get("display"):
+        return remote
     return MODEL_CATALOG.get(plan_key, {"default": "auto", "display": ()})
 
 
@@ -1405,6 +1433,7 @@ def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
     credentials_path.write_text(
         json.dumps({"TOKENPLAN_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n"
     )
+    _harden(credentials_path)
     backup_file(patch_path)
     patch_path.write_text("[]\n")
     info("DeepSeek Harness 已更新内置 pi-ai Provider 设置")
@@ -1431,6 +1460,7 @@ def install_codex_shell_env(api_key: str) -> None:
         return
     env_path = cfg_path(".codex", "tokenplan.env")
     env_path.write_text(f"export TOKENPLAN_API_KEY={json.dumps(api_key)}\n")
+    _harden(env_path)
     record_state("env_files", str(env_path))
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
@@ -1667,6 +1697,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         prog="tokenplan-setup",
         description="腾讯云 Token Plan 一键接入 CLI",
         formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"tokenplan-setup {VERSION}",
+        help="显示版本号并退出",
     )
     parser.add_argument(
         "command",
@@ -2017,7 +2053,7 @@ def main() -> None:
     print("  ╚══════════════════════════════════════════════╝")
     print()
     print("  命令: setup / repair / doctor / uninstall")
-    print("  默认: setup")
+    print(f"  版本: v{VERSION}（默认: setup）")
     print()
 
     plan = resolve_plan_from_arg(args.plan) or choose_plan()
@@ -2061,6 +2097,13 @@ def main() -> None:
             return
     else:
         ok("API Key 验证通过")
+    print()
+
+    refresh_remote_catalog()
+    if _REMOTE_CATALOG:
+        info(f"模型目录已更新（远程 {sum(len(p.get('display', ())) for p in _REMOTE_CATALOG.values())} 条）")
+    else:
+        info("使用内置模型目录（远程目录不可用或未配置）")
     print()
 
     remote_models = fetch_remote_models(base_url, api_key)
@@ -2129,17 +2172,11 @@ def main() -> None:
             continue
 
         if requires_backend_dependency(tool, "npx") and not shutil.which("npx"):
-            if args.command == "setup":
-                warn("检测到缺少 npx，先自动安装 DeepSeek Harness 所需 Node.js 依赖")
-                if not install_tool(tool):
-                    failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
-                    print()
-                    continue
-            else:
-                failed.append((tool, "缺少 npx，无法启动 DeepSeek Harness"))
-                warn("DeepSeek Harness 需要 Node.js / npx")
-                print()
-                continue
+            failed.append((tool, f"缺少 npx，无法启动 {tool.name}"))
+            warn(f"{tool.name} 需要 Node.js / npx（含 npm 的 LTS 版本即可）")
+            info("安装地址: https://nodejs.org/en/download")
+            print()
+            continue
 
         if not already_installed and supports_auto_install(tool):
             if repair_mode:

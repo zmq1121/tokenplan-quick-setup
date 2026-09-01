@@ -178,14 +178,37 @@ chmod +x tokenplan-setup
 
 - `setup`：安装并补全配置，默认模式；
 - `repair`：仅修复已安装工具的配置；
-- `doctor`：只检查环境和安装状态，不修改任何文件。
+- `doctor`：只检查环境和安装状态，不修改任何文件；
+- `uninstall`：从备份还原配置，并清理安装器写入的文件/环境变量/PATH 修改。
 
 例如：
 
 ```bash
 bash setup.command doctor
 bash setup.command repair --plan enterprise-pro --tools dsh,opencode
+bash setup.command --version
 ```
+
+## 模型列表更新机制
+
+模型目录有两级来源：
+
+1. **远程目录（优先）**：仓库根目录的 [models.json](models.json)，安装器启动时通过 jsDelivr CDN 拉取。**新模型上线只需修改这个 JSON 并提交**，所有已分发出去的安装器（包括旧的微信文件）下次运行时自动拿到新列表，无需重新发文件；
+2. **内置目录（回退）**：`setup.command` 内的 `MODEL_CATALOG`，远程不可用（离线/CDN 被墙）时使用。
+
+个人版套餐还会额外调用 API `/models` 端点做交叉核对；企业版端点不提供该 API，以策展目录为准。
+
+## 开发与测试
+
+```bash
+python3 tests/run_tests.py          # 全部回归测试（67 项，零依赖）
+python3 tests/run_tests.py codex    # 只跑某一组
+python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 构建产物
+```
+
+`tests/run_tests.py` 通过 exec 直接加载 `setup.command`（与真实运行路径一致），覆盖：注册表完整性（17 工具、编号稳定）、Windows 平台行为模拟、TOML 手术安全性、Codex 配置器端到端、卸载生命周期、文件权限、交互流 EOF 安全、远程目录回退、npm/lib 字节一致性与版本号一致性。
+
+发布 npm 前务必先跑测试再执行 `scripts/sync_npm_lib.py`——一致性校验失败会直接报错。
 
 ## Claude Code 模型选择说明
 

@@ -1,6 +1,6 @@
 {
   "name": "tokenplan-setup",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "腾讯云 Token Plan 一键接入 CLI —— npx tokenplan-setup 即用",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,7 @@
   },
   "files": [
     "bin/",
-    "lib/setup.command",
+    "lib/",
     "README.md"
   ],
   "engines": {

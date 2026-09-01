@@ -19,6 +19,15 @@ import time
 import types
 from pathlib import Path
 
+# Windows 默认 stdout 编码(cp1252/GBK)无法打印中文与制表符(CI 红的原因),
+# 本地与 CI 统一强制 UTF-8;stdout 可能被替换(重定向/pytest)时静默跳过。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "setup.command"
 NPM_LIB = REPO / "npm" / "lib" / "setup.command"

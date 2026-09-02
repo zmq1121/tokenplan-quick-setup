@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -703,7 +703,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         usage_lines=(
             "终端输入: codex",
             "切换模型: 会话中输入 /model，或编辑 ~/.codex/config.toml 的 model 字段",
-            "Token Plan 走 Responses 协议(wire_api = responses)，已自动配置",
+            "企业/国际/后付费走 responses 协议;个人版走 chat(官方文档规定),已自动配置",
+            "个人版注意: Codex 0.152+ 移除了 chat 模式,如遇配置报错需降级 Codex",
             "API Key 环境变量: TOKENPLAN_API_KEY",
         ),
     ),
@@ -1871,6 +1872,32 @@ def _strip_managed_block(lines: List[str], begin: str, end: str) -> List[str]:
     return out
 
 
+def _toml_normalize_header(header: str) -> str:
+    """[models."glm-5.3"] and [models.glm-5.3] both -> models.glm-5.3."""
+    inner = header.strip()[1:-1]
+    parts = [p.strip().strip('"').strip("'") for p in inner.split(".")]
+    return ".".join(parts)
+
+
+def _toml_remove_sections(lines: List[str], targets: set) -> List[str]:
+    """Drop whole [table] sections whose normalized header is in targets.
+
+    Used to clean legacy unquoted sections written by <= 2.1.1 (dotted
+    model ids parsed as nested tables there).
+    """
+    out: List[str] = []
+    skipping = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]") and not s.startswith("[["):
+            skipping = _toml_normalize_header(s) in targets
+            if skipping:
+                continue
+        if not skipping:
+            out.append(line)
+    return out
+
+
 def _toml_upsert_root_key(lines: List[str], key: str, value: str) -> List[str]:
     """Set a root-level TOML key (before the first table header), preserving the rest."""
     rendered = f'{key} = "{value}"'
@@ -1935,13 +1962,19 @@ def _toml_upsert_section(
 
 
 def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
-    """Configure Codex CLI against the Token Plan Responses endpoint.
+    """Configure Codex CLI; wire_api is domain-dependent (real-key verified).
 
-    Codex only supports wire_api = "responses"; Token Plan exposes
-    /plan/v3/responses on every site (verified by endpoint probing).
+    - tokenhub domains (enterprise/intl/postpaid): "responses" — endpoint
+      serves 200, and Codex >=0.152 dropped chat support so responses is
+      the only mode that works on current Codex
+    - lkeap (personal plans): "chat" per official doc 1823/130071 — lkeap
+      has no /responses (404). Codex >=0.152 rejects chat at config load;
+      personal-plan users need a Codex from before the deprecation
+      (openai/codex discussion #7782)
     """
     config_path = cfg_path(".codex", "config.toml")
     default_model = str(get_model_catalog(plan.key)["default"])
+    wire_api = "chat" if "lkeap" in base_url else "responses"
     existing_lines = (
         config_path.read_text().splitlines() if config_path.exists() else []
     )
@@ -1954,13 +1987,18 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
         {
             "name": "Tencent Cloud Token Plan",
             "base_url": base_url,
-            "wire_api": "responses",
+            "wire_api": wire_api,
             "env_key": "TOKENPLAN_API_KEY",
         },
     )
     config_path.write_text("\n".join(lines).rstrip() + "\n")
     install_codex_shell_env(api_key)
-    info(f"Codex 已配置: {config_path} (model = {default_model})")
+    if wire_api == "chat":
+        warn(
+            "个人版(lkeap)无 Responses 端点,已按官方文档写入 wire_api=chat;"
+            "注意 Codex 0.152+ 已移除 chat 模式,如报错需降级 Codex 版本"
+        )
+    info(f"Codex 已配置: {config_path} (model = {default_model}, wire_api = {wire_api})")
 
 
 def _kimi_home() -> Path:
@@ -1986,7 +2024,9 @@ def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     backup_file(config_path)
     catalog = get_model_catalog(plan.key)
     default_model = str(catalog["default"])
-    lines = _toml_upsert_root_key(existing_lines, "default_provider", "tokenplan")
+    managed = {f"models.{m}" for m in get_model_ids(plan.key)}
+    lines = _toml_remove_sections(existing_lines, managed)
+    lines = _toml_upsert_root_key(lines, "default_provider", "tokenplan")
     lines = _toml_upsert_root_key(lines, "default_model", default_model)
     lines = _toml_upsert_section(
         lines,
@@ -1999,9 +2039,11 @@ def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     )
     for model_id in get_model_ids(plan.key):
         display = _display_name(catalog, model_id)
+        # 模型 id 含点号(glm-5.3):TOML 表头中点是分隔符,必须引号包裹,
+        # 否则解析成嵌套表并与平级 [models.glm-5] 冲突 → 整个文件解析失败
         lines = _toml_upsert_section(
             lines,
-            f"[models.{model_id}]",
+            f'[models."{model_id}"]',
             {
                 "provider": "tokenplan",
                 "model": model_id,
@@ -2037,7 +2079,7 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
     block: List[str] = ["", "# Token Plan models begin"]
     for model_id in get_model_ids(plan.key):
         display = _display_name(catalog, model_id)
-        block.append(f"[model.{model_id}]")
+        block.append(f'[model."{model_id}"]')
         block.append(f'model = "{model_id}"')
         block.append(f'base_url = "{base_url}"')
         block.append(f'name = "{display}"')

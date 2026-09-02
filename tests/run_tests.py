@@ -112,7 +112,7 @@ def test_registry_windows():
 def test_toml_surgery():
     mod = load_module()
     U, S = mod._toml_upsert_root_key, mod._toml_upsert_section
-    entries = {"name": "T", "base_url": "https://x", "wire_api": "responses",
+    entries = {"name": "T", "base_url": "https://x", "wire_api": "chat",
                "env_key": "TOKENPLAN_API_KEY"}
 
     lines = S(U(U([], "model_provider", "tokenplan"), "model", "glm-5.2"),
@@ -148,7 +148,16 @@ def test_codex_config():
     cfg = tmp / ".codex" / "config.toml"
     text = cfg.read_text()
     check("Codex: config.toml 生成", cfg.exists())
-    check("Codex: wire_api=responses", 'wire_api = "responses"' in text)
+    # 按域分治(真 Key 实测):tokenhub 域用 responses(Codex 0.152+ 唯一支持的模式,
+    # 端点 200;lkeap 个人版无 /responses(404),按官方文档用 chat)
+    check("Codex: tokenhub 域 wire_api=responses", 'wire_api = "responses"' in text)
+    # lkeap 个人版:按官方文档走 chat + 警告
+    (tmp / ".codex" / "config.toml").unlink()
+    with contextlib.redirect_stdout(io.StringIO()):
+        mod.configure_codex("https://api.lkeap.cloud.tencent.com/plan/v3", key,
+                            mod.PLAN_CATALOG["1"])
+    ltext = (tmp / ".codex" / "config.toml").read_text()
+    check("Codex: lkeap 域 wire_api=chat(官方文档)", 'wire_api = "chat"' in ltext)
     if sys.platform == "win32":
         # Windows 设计:走 setx 用户环境变量,不写 env 文件
         check("Codex: Windows 注入 TOKENPLAN_API_KEY",
@@ -509,6 +518,14 @@ def test_new_tool_configs():
           toml.index("default_provider") < toml.index("[providers.tokenplan]"))
     check("kimi: 模型段数", toml.count("[models.") == len(models))
     check("kimi: max_context_size 必填字段", "max_context_size" in toml)
+    # 含点号的模型 id(minimax-m2.7 等)必须引号包裹:
+    # TOML 表头中点是分隔符,[models.glm-5.3] 会解析成嵌套表,
+    # 且与平级 [models.glm-5] 冲突 → 整个文件解析失败(2.2.0 修复)
+    import re as _re
+    secs = _re.findall(r'^\[models\.[^\]]+\]', toml, _re.M)
+    check("kimi: 模型段全部引号包裹(点号安全)",
+          len(secs) == len(models) and all('"' in s for s in secs))
+    check("kimi: 无遗留无引号段", _re.search(r'^\[models\.[^"\]]+\]$', toml, _re.M) is None)
     with contextlib.redirect_stdout(buf):
         mod.configure_kimi(base, key, plan)
     toml2 = (tmp / ".kimi-code" / "config.toml").read_text()
@@ -518,6 +535,9 @@ def test_new_tool_configs():
     # Grok: config.toml
     gtoml = (tmp / ".grok" / "config.toml").read_text()
     check("grok: 模型段数", gtoml.count("[model.") == len(models))
+    gsecs = _re.findall(r'^\[model\.[^\]]+\]', gtoml, _re.M)
+    check("grok: 模型段全部引号包裹(点号安全)",
+          len(gsecs) == len(models) and all('"' in s for s in gsecs))
     check("grok: base_url 写入", base in gtoml)
     check("grok: 托管标记", "# Token Plan models begin" in gtoml)
     with contextlib.redirect_stdout(buf):

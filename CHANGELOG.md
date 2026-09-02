@@ -2,6 +2,51 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.2.0] - 2026-09-02
+
+### 修复:全产品线真 Key 实测发现的两处严重配置 bug
+
+用全部 8 条产品线的真实 API Key 做了端到端验证(工具真实运行、
+真实模型输出),发现并修复:
+
+**① Kimi Code / Grok 的 TOML 点号 bug(企业版套餐完全不可用)**
+
+- 模型 id 含点号(glm-5.3、minimax-m2.7、kimi-k2.7-code…)时,
+  `[models.glm-5.3]` 会被 TOML 解析成嵌套表,且与平级
+  `[models.glm-5]` 冲突 → **整个 config.toml 解析失败**
+- 企业专业版(3/6)同时含 glm-5.x 家族 → kimi/grok 直接报
+  "No model configured";个人版默认模型无点号所以侥幸可用
+- 修复:表头引号包裹 `[models."glm-5.3"]`;kimi 升级路径自动
+  清理 2.1.x 写入的无引号旧段
+- 真 Key 端到端验证:kimi/grok/pi 在企业专业、个人通用、后付费
+  三条产品线全部真实对话成功(Grok 用 glm-5.3 验证点号修复)
+
+**② Codex 的 wire_api 按域分治(个人版 404 / 新版 Codex 不兼容 chat)**
+
+- 官方文档(1823/130071、130666)写 `wire_api = "chat"`,但
+  Codex 0.152+ 已**移除 chat 模式**(openai/codex#7782),配置
+  直接报错;而 lkeap 个人版又没有 `/responses` 端点(真 Key 404)
+- 修复:tokenhub 域(企业/国际/后付费)写 `responses`(真 Key
+  实测 200 + Codex 0.152.1 端到端真实对话成功);lkeap 个人版按
+  官方文档写 `chat` 并警告需降级 Codex 版本
+- 这是新版 Codex 在个人版上的官方级无解困境(官方文档自身也
+  已失效),已在配置时明确告知用户
+
+### 真 Key 验证矩阵(2026-09-02)
+
+| 产品线 | 协议验证 | 工具端到端 |
+|--------|---------|-----------|
+| 个人通用/混元(lkeap) | cc ✓ anthropic ✓(responses 404) | kimi ✓ |
+| 企业专业/轻享(tokenhub) | cc ✓ responses ✓ anthropic ✓ | codex/kimi/grok/pi/claude-code ✓ |
+| 后付费(tokenhub /v1) | cc ✓ responses ✓ anthropic ✓ | kimi ✓(130 模型发现) |
+| 国际版(tokenhub-intl) | 域名路由正常 | **提供的 3 个 Key 均无效(401002)**,待有效 Key 复验 |
+
+注:无 Key 探测的 401 只能证明鉴权层拦截,**不能证明路由存在**
+(lkeap /responses 即反例:无 Key 401、有 Key 404)——此前 2.1.x
+的"端点已验证"说法据此修正。
+
+[2.2.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.2.0
+
 ## [2.1.1] - 2026-09-02
 
 ### 修复:后付费套餐的 Claude Code 配置不可用

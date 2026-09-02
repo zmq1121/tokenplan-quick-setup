@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -374,16 +374,19 @@ MODEL_CATALOG = {
             "DeepSeek-V4-Flash: deepseek-v4-flash-202605",
             "DeepSeek-V4-Pro: deepseek-v4-pro-202606",
             "MiniMax-M2.7: minimax-m2.7",
+            "MiniMax-M3: minimax-m3",
             "GLM-5: glm-5",
             "GLM-5.1: glm-5.1",
             "GLM-5.2: glm-5.2",
-            "Kimi-K2.5: kimi-k2.5 (已过 2026-08-31 下线日期,可能不可用)",
+            "GLM-5.3: glm-5.3",
+            "Kimi-K2.7-Code: kimi-k2.7-code",
         ),
     },
     "personal-hy": {
         "default": "hy3",
         "display": (
             "Hy3: hy3",
+            "Hy4-preview: hy4-preview",
         ),
     },
     "enterprise-pro": {

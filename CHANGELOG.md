@@ -2,6 +2,21 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.2] - 2026-09-02
+
+### 模型目录更新(中国站个人版,官方文档 1823/130060)
+
+- **通用套餐(选项 1)** 8 → 10 个:新增 MiniMax-M3(`minimax-m3`)、
+  GLM-5.3(`glm-5.3`)、Kimi-K2.7-Code(`kimi-k2.7-code`);
+  移除已下线的 Kimi-K2.5
+- **Hy 套餐(选项 2)** 1 → 2 个:新增 Hy4 preview(`hy4-preview`,
+  官方注明高峰可能限频)
+- 新模型已用真实套餐 Key 逐个端到端验证(全部 HTTP 200)
+- `scripts/check_models.py` 个人版对照文档从旧快速入门 130119
+  切换到套餐详情页 130060(2026-09 起权威源);模型词根正则支持 hy4
+
+[1.4.2]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.4.2
+
 ## [1.4.1] - 2026-09-02
 
 ### 改进

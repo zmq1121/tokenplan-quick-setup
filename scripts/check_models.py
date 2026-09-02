@@ -32,12 +32,12 @@ MODELS_JSON = REPO / "models.json"
 # 官方文档页(中国站)。套餐 key 与 models.json 对齐。
 DOC_PAGES = {
     "personal-general": (
-        "https://cloud.tencent.com/document/product/1823/130119",
-        "获取模型配置",   # 通用套餐表锚点
+        "https://cloud.tencent.com/document/product/1823/130060",
+        "tc-code-latest",  # 通用套餐表(套餐详情页,2026-09 起为权威源)
     ),
     "personal-hy": (
-        "https://cloud.tencent.com/document/product/1823/130119",
-        "Hy3",            # Hy 套餐表锚点(同页第二个表)
+        "https://cloud.tencent.com/document/product/1823/130060",
+        "hy3",             # Hy 套餐表(同页)
     ),
     "enterprise-pro": (
         "https://cloud.tencent.com/document/product/1823/130659",
@@ -66,7 +66,7 @@ def fetch(url: str) -> str:
 
 
 MODEL_STEM = re.compile(
-    r"glm|kimi|minimax|deepseek|hunyuan|hy3|tc-code|auto", re.I
+    r"glm|kimi|minimax|deepseek|hunyuan|hy[34]|tc-code|auto", re.I
 )
 # 模型 ID 列:整体为纯 ASCII [a-zA-Z0-9./_-](粘连多个 ID 也符合),
 # 排除计费表("空闲时段"/"[0, 512k)"等中文或带括号的列)。

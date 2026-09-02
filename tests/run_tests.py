@@ -642,7 +642,7 @@ def test_main_interactions():
                    "--tools", "workbuddy"], ["1"])
         check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
         wb_models = json.loads((wb_home / ".workbuddy" / "models.json").read_text())
-        check("WorkBuddy: 模型真实落盘", len(wb_models) == 8)
+        check("WorkBuddy: 模型真实落盘", len(wb_models) == 10)  # personal-general 目录现为 10 模型
     finally:
         _sp.run = _real
 

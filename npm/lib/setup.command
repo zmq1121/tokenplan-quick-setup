@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -229,8 +229,19 @@ def _harden(path: Path) -> None:
         pass
 
 
-def write_json(path: Path, data: object, merge: bool = False) -> None:
-    """Backup then write JSON; merge=True shallow-merges into existing dicts. Hardens to 0o600."""
+def write_json(
+    path: Path,
+    data: object,
+    merge: bool = False,
+    merge_key: Optional[str] = None,
+) -> None:
+    """Backup then write JSON; hardens to 0o600.
+
+    merge=True with dicts shallow-merges (existing.update).
+    merge=True with lists and merge_key set keeps user entries and
+    replaces only entries whose merge_key matches ours (list order:
+    user's non-conflicting entries first, then ours).
+    """
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if merge and path.exists():
@@ -241,6 +252,22 @@ def write_json(path: Path, data: object, merge: bool = False) -> None:
         if isinstance(existing, dict) and isinstance(data, dict):
             existing.update(data)
             data = existing
+        elif (
+            isinstance(existing, list)
+            and isinstance(data, list)
+            and merge_key
+        ):
+            ours_keys = {
+                str(entry.get(merge_key))
+                for entry in data
+                if isinstance(entry, dict)
+            }
+            kept = [
+                entry
+                for entry in existing
+                if not (isinstance(entry, dict) and str(entry.get(merge_key)) in ours_keys)
+            ]
+            data = kept + list(data)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     _harden(path)
 
@@ -726,11 +753,12 @@ TOOLS: Tuple[ToolSpec, ...] = (
         backend="desktop",
         check_exe=None,
         download_url="https://workbuddy.qq.com",
+        cfg_hint="~/.workbuddy/models.json",
         usage_lines=(
             "下载安装: https://workbuddy.qq.com（腾讯云 AI 桌面智能体）",
-            "在应用内 设置 → 模型/服务商 处添加自定义接入",
-            "Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写",
+            "模型配置: 安装器已自动写入当前套餐全部模型到 ~/.workbuddy/models.json",
+            "打开 WorkBuddy → 模型选择,即可看到 TokenPlan 开头的模型",
+            "如需手动添加: 设置 → 模型/服务商,Base URL: {base_url}",
         ),
     ),
     ToolSpec(
@@ -1577,6 +1605,72 @@ def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
     info("OpenCode 已写入 Token Plan 自定义 Provider")
 
 
+def _workbuddy_model_entry(
+    model_id: str, plan: PlanSpec, base_url: str, api_key: str
+) -> Dict[str, object]:
+    """Build one WorkBuddy models.json entry (format reverse-engineered
+    from a real user's hand-added entry; fields verified against it)."""
+    catalog = get_model_catalog(plan.key)
+    display = tuple(catalog.get("display", ()))
+    # 显示名优先用目录里的友好名;找不到就裸 ID
+    friendly = ""
+    for line in display:
+        if ":" in line and line.split(":", 1)[1].strip().split(" ")[0] == model_id:
+            friendly = line.split(":", 1)[0].strip()
+            break
+    plan_short = plan.display_name.split(" - ")[-1].split("（")[0]
+    # 多模态模型(如 deepseek-vision-exp)开图片;其余企业/个人模型按文本对话模型处理
+    multimodal = "vision" in model_id.lower()
+    return {
+        "id": model_id,
+        "name": f"TokenPlan{plan_short} / {friendly or model_id}",
+        "vendor": "Tencent Cloud Token Plan",
+        "url": f"{base_url}/chat/completions",
+        "apiKey": api_key,
+        "supportsToolCall": True,
+        "supportsImages": multimodal,
+        "supportsReasoning": True,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+    }
+
+
+def configure_workbuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Write all plan models into ~/.workbuddy/models.json in one shot.
+
+    WorkBuddy's manual UI adds models one field-form at a time; this
+    writes the whole plan catalog at once. User's own entries in the
+    list are preserved (merge by id); if WorkBuddy is running we ask
+    the user to quit first so it doesn't overwrite the file on exit.
+    """
+    try:
+        running = any(
+            proc
+            for proc in ("WorkBuddy",)
+            if shutil.which("pgrep") and subprocess.run(
+                ["pgrep", "-f", proc], capture_output=True
+            ).returncode == 0
+        )
+    except Exception:
+        running = False
+    if running:
+        warn("检测到 WorkBuddy 正在运行;请先完全退出(菜单栏图标 → 退出)后重跑")
+        warn("否则 WorkBuddy 退出时会用内存中的旧模型列表覆盖本次写入")
+        raise RuntimeError("WorkBuddy 正在运行,请退出后重试")
+
+    entries = [
+        _workbuddy_model_entry(m, plan, base_url, api_key)
+        for m in get_model_ids(plan.key)
+    ]
+    write_json(
+        cfg_path(".workbuddy", "models.json"),
+        entries,
+        merge=True,
+        merge_key="id",
+    )
+    ok(f"已写入 {len(entries)} 个模型到 ~/.workbuddy/models.json(原有自建模型已保留)")
+
+
 def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Write ~/.dsh/settings.yaml pi-ai provider and credentials."""
     settings_path = cfg_path(".dsh", "settings.yaml")
@@ -1733,6 +1827,7 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
+    "workbuddy": configure_workbuddy,
     "codebuddy": configure_codebuddy,
     "claude-code": configure_claude_code,
     "hermes": configure_hermes,
@@ -1752,6 +1847,7 @@ CONFIG_SIGNATURES: Dict[str, Tuple[str, str]] = {
     "opencode": (".config/opencode/opencode.json", "tokenplan"),
     "dsh": (".dsh/settings.yaml", "tokenplan"),
     "codex": (".codex/config.toml", "[model_providers.tokenplan]"),
+    "workbuddy": (".workbuddy/models.json", "Tencent Cloud Token Plan"),
 }
 
 
@@ -2000,7 +2096,10 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
     for tool in selected_tools:
         installed = is_tool_installed(tool)
         configured = probe_config(tool)
-        if installed and configured is True:
+        if configured is True and not installed:
+            # 配置已写好但应用本体不在(桌面应用手动安装类,如 WorkBuddy)
+            status = "未安装应用,但 Token Plan 模型配置已就绪"
+        elif installed and configured is True:
             status = "已安装,Token Plan 配置有效"
         elif installed and configured is False:
             status = "已安装,Token Plan 配置缺失"

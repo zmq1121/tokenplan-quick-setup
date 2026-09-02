@@ -232,6 +232,68 @@ def test_permissions():
 
 
 # ---------------------------------------------------------------------------
+# 测试组: WorkBuddy 全量模型写入
+
+def test_workbuddy_config():
+    mod = load_module()
+    tmp = sandbox(mod)
+    # 钉死目录来源:测试必须与网络状态无关(内置目录,企业专业=18 模型)
+    mod._REMOTE_CATALOG = None
+    plan = mod.PLAN_CATALOG["3"]  # 企业专业,18 模型
+    base, key = "https://tokenhub.tencentmaas.com/plan/v3", "sk-wb-test-1234567890"
+
+    # 预置用户手填条目(模拟真实场景:已有 1 条自建 + 1 条旧 TokenPlan)
+    models = tmp / ".workbuddy" / "models.json"
+    models.parent.mkdir(parents=True, exist_ok=True)
+    models.write_text(json.dumps([
+        {"id": "my-own-model", "name": "自建模型", "apiKey": "sk-user-own"},
+        {"id": "glm-5.2", "name": "旧的手填 TokenPlan", "apiKey": "sk-old"},
+    ], ensure_ascii=False))
+
+    import contextlib, io as _io
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.configure_workbuddy(base, key, plan)
+
+    data = json.loads(models.read_text())
+    ids = [e["id"] for e in data]
+    # 预置了 1 条用户自建 + 1 条旧 TokenPlan(被更新) → 总数 = 目录数 + 1
+    check("WorkBuddy: 写入全部套餐模型", len(ids) == len(mod.get_model_ids("enterprise-pro")) + 1)
+    check("WorkBuddy: 套餐模型全部在列",
+          set(mod.get_model_ids("enterprise-pro")) <= set(ids))
+    check("WorkBuddy: 用户自建模型保留", "my-own-model" in ids and json.dumps(data).find("sk-user-own") != -1)
+    check("WorkBuddy: 旧 TokenPlan 条目被更新(非重复)",
+          ids.count("glm-5.2") == 1 and [e for e in data if e["id"] == "glm-5.2"][0]["apiKey"] == key)
+    check("WorkBuddy: 条目使用 chat/completions URL",
+          all(e["url"].endswith("/chat/completions") for e in data if e["id"] != "my-own-model"))
+    check("WorkBuddy: vision 模型标记图片能力",
+          [e for e in data if e["id"] == "deepseek/deepseek-v4-flash-vision-exp"][0]["supportsImages"] is True)
+    check("WorkBuddy: 文本模型不标图片",
+          [e for e in data if e["id"] == "glm-5.3"][0]["supportsImages"] is False)
+    check("WorkBuddy: 文件权限 600", models.stat().st_mode & 0o777 == 0o600)
+    # 幂等验证
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.configure_workbuddy(base, key, plan)
+    ids2 = [e["id"] for e in json.loads(models.read_text())]
+    check("WorkBuddy: 重跑后条目数不变(幂等)", len(ids2) == len(ids))
+    check("WorkBuddy: doctor 签名存在", mod.probe_config(mod.TOOL_BY_KEY["workbuddy"]) is True)
+
+
+def test_write_json_list_merge():
+    mod = load_module()
+    tmp = sandbox(mod)
+    p = tmp / "list.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps([{"id": "a", "v": 1}, {"id": "user", "v": 9}]))
+    mod.write_json(p, [{"id": "a", "v": 2}, {"id": "b", "v": 3}], merge=True, merge_key="id")
+    data = {e["id"]: e["v"] for e in json.loads(p.read_text())}
+    check("list合并: 同 id 更新", data["a"] == 2)
+    check("list合并: 新 id 追加", data["b"] == 3)
+    check("list合并: 用户条目保留", data["user"] == 9)
+    check("list合并: 总数正确", len(data) == 3)
+
+
+# ---------------------------------------------------------------------------
 # 测试组: doctor 配置三态 / 超时 / 版本感知
 
 def test_doctor_config_probe():
@@ -480,6 +542,8 @@ TEST_GROUPS = [
     ("codex", test_codex_config),
     ("uninstall", test_uninstall),
     ("permissions", test_permissions),
+    ("workbuddy", test_workbuddy_config),
+    ("list-merge", test_write_json_list_merge),
     ("doctor-probe", test_doctor_config_probe),
     ("timeout", test_install_timeout),
     ("version", test_version_awareness),

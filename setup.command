@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -1466,10 +1466,12 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Write ~/.claude/settings.json env block + model slots + tokenplan launcher."""
     if base_url.rstrip("/").endswith("/v1"):
-        # 后付费(tokenhub /v1):Anthropic 标准端点 /v1/messages 已实测可用,
-        # Claude 的 ANTHROPIC_BASE_URL 填到 /v1 为止(客户端自动拼 /messages)
-        anthropic_url = base_url.rstrip("/")
+        # 后付费(tokenhub /v1):Anthropic SDK 硬拼 /v1/messages,
+        # base 必须写到域名根(不带 /v1),否则会请求 /v1/v1/messages → 404
+        anthropic_url = base_url.rstrip("/")[: -len("/v1")]
     else:
+        # 套餐版:官方文档规定 ANTHROPIC_BASE_URL = <host>/plan/anthropic
+        # (SDK 拼接 /v1/messages 后即 <host>/plan/anthropic/v1/messages,已探活验证)
         anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
     catalog = get_model_catalog(plan.key)
     default_model = str(catalog["default"])
@@ -2592,7 +2594,14 @@ def run_uninstall(yes: bool) -> int:
 
 
 def fetch_remote_models(base_url: str, api_key: str) -> Optional[List[str]]:
-    """Fetch the model list from the OpenAI-compatible /models endpoint."""
+    """Fetch the model list from the OpenAI-compatible /models endpoint.
+
+    Note: only lkeap (personal plans) and the postpaid tokenhub /v1
+    expose /models; the tokenhub plan/v3 domains return 404. Callers
+    treat None as "skip the cross-check" — cosmetic only.
+    """
+    if "/plan/v3" in base_url and "lkeap" not in base_url:
+        return None  # tokenhub plan 域不提供 /models(已探活确认)
     try:
         req = urllib.request.Request(
             f"{base_url}/models",

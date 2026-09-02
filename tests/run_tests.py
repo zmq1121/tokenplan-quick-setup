@@ -367,7 +367,10 @@ def test_postpaid():
         mod.configure_claude_code(base, "sk-pp-test-1234567890", plan)
     settings = json.loads((tmp / ".claude" / "settings.json").read_text())
     env = settings.get("env", {})
-    check("后付费: Claude anthropic 端点(即 /v1,Claude 自动拼 /messages)", env.get("ANTHROPIC_BASE_URL") == base)
+    # Anthropic SDK 硬拼 /v1/messages:base 必须为裸域(不带 /v1),
+    # 否则请求 /v1/v1/messages → 404(2.1.1 修复)
+    check("后付费: Claude anthropic base 为裸域(SDK 拼 /v1/messages)",
+          env.get("ANTHROPIC_BASE_URL") == base.rstrip("/")[:-len("/v1")])
     check("后付费: Claude opus 槽选 glm-5.3", env.get("ANTHROPIC_DEFAULT_OPUS_MODEL") == "glm-5.3")
     check("后付费: Claude haiku 槽选 flash", env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") == "glm-5.3-flash")
 

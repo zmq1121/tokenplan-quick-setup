@@ -40,8 +40,8 @@ echo.
 REM ── 2. 下载主脚本（固定版本镜像，多源回退） ────────────────────
 REM SETUP_VERSION / SETUP_SHA256 由 scripts/sync_npm_lib.py 自动注入,
 REM 手动修改无效——修改 setup.command 后必须重新运行同步脚本。
-set "SETUP_VERSION=2.1.0"
-set "SETUP_SHA256=3b87f6a658bf77407fd0fac6f3aa5edb73e21f2be32f418b9d8bd3df6a869994"
+set "SETUP_VERSION=2.1.1"
+set "SETUP_SHA256=4e4153e519134649f7303bd215ea506d3a28d1b04ebb28f11a5ee8367debfbeb"
 
 set "TMPFILE=%TEMP%\tokenplan-setup.py"
 

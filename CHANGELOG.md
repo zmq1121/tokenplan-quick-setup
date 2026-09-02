@@ -2,6 +2,38 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.1.1] - 2026-09-02
+
+### 修复:后付费套餐的 Claude Code 配置不可用
+
+- **bug**:后付费(选项 8)写入的 `ANTHROPIC_BASE_URL` 以 `/v1` 结尾,
+  而 Anthropic SDK 固定在 base 后拼接 `/v1/messages`,导致实际请求
+  `…/v1/v1/messages` → 404。此前注释"客户端自动拼 /messages"判断错误
+  (已读 SDK 源码确认:`this._client.post('/v1/messages', …)`)
+- **修复**:base 写到域名根(不带 `/v1`),SDK 拼出正确的
+  `https://tokenhub.tencentmaas.com/v1/messages`(已探活:401 鉴权层
+  响应,路径正确)
+- 附带:套餐版(3-7,tokenhub 域)不提供 `/models` 列表端点(探活
+  404),`fetch_remote_models` 对这些域直接跳过目录交叉校验提示
+  (该提示本来就只是锦上添花,lkeap 个人版与后付费不受影响)
+
+### 全产品线端点矩阵验证(本次审计结果)
+
+4 个域 × 3 协议路径全部探活通过(无 Key 请求均得到鉴权层 401,
+证明路由正确):
+
+| 域 | chat/completions | /responses | anthropic |
+|----|-----------------|-----------|-----------|
+| lkeap(个人版) | ✓ | ✓ | /plan/anthropic/v1/messages ✓ |
+| tokenhub(企业版) | ✓ | ✓ | /plan/anthropic/v1/messages ✓ |
+| tokenhub-intl(国际版) | ✓ | ✓ | /plan/anthropic/v1/messages ✓ |
+| tokenhub /v1(后付费) | ✓ | ✓ | /v1/messages ✓ |
+
+`/plan/anthropic` 路径已对照官方文档(cloud.tencent.com 130665/
+130070)确认。
+
+[2.1.1]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.1.1
+
 ## [2.1.0] - 2026-09-02
 
 ### 新增:四个 AI 编程工具(对标火山方舟 arkcli 的支持面)

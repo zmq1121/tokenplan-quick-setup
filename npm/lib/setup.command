@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.4.2"
+VERSION = "1.5.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -737,20 +737,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="cursor",
-        name="Cursor",
-        backend="desktop",
-        check_exe=None,
-        download_url="https://cursor.com",
-        usage_lines=(
-            "下载安装: https://cursor.com",
-            "打开 Settings → Models → 开启 OpenAI API Key 覆盖(Override)",
-            "Base URL: {base_url}",
-            "填入 API Key 后即可在模型列表选择套餐模型",
-            "配置位置: Cursor Settings → Models",
-        ),
-    ),
-    ToolSpec(
         key="trae",
         name="TRAE",
         backend="desktop",
@@ -775,20 +761,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "模型配置: 安装器已自动写入当前套餐全部模型到 ~/.workbuddy/models.json",
             "打开 WorkBuddy → 模型选择,即可看到 TokenPlan 开头的模型",
             "如需手动添加: 设置 → 模型/服务商,Base URL: {base_url}",
-        ),
-    ),
-    ToolSpec(
-        key="lighthouse-openclaw",
-        name="Lighthouse OpenClaw",
-        backend="deploy",
-        check_exe=None,
-        download_url="https://console.cloud.tencent.com/lighthouse",
-        usage_lines=(
-            "场景: 在腾讯云轻量应用服务器上部署 OpenClaw，随时随地远程访问",
-            "服务器购买/管理: https://console.cloud.tencent.com/lighthouse",
-            "服务器上运行本安装器并选择 OpenClaw，即可完成同样的自动配置",
-            "本地与服务器可共用同一个 Token Plan API Key",
-            "服务器端配置文件: ~/.openclaw/openclaw.json",
         ),
     ),
     ToolSpec(

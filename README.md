@@ -1,6 +1,6 @@
 # 腾讯云 Token Plan 一键接入
 
-将腾讯云大模型 API 的接入配置(服务端点、API Key、模型列表)自动写入 17 个 AI 编程工具,运行一次即可完成安装与配置。
+将腾讯云大模型 API 的接入配置(服务端点、API Key、模型列表)自动写入 15 个 AI 编程工具,运行一次即可完成安装与配置。
 
 面向新用户的完整操作指引见 [使用说明](docs/USER-GUIDE.md)。
 
@@ -51,10 +51,10 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 8 | 后付费 - 按量计费 | — | `https://tokenhub.tencentmaas.com/v1` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
 
 - 选项 1-7 为包月订阅,不同产品线的 API Key 不通用,请在对应控制台创建
-- 选项 8 按 token 计费,模型列表由 `/v1/models` 实时发现并自动过滤非聊天模型,可交互选择或通过 `--models` 参数指定;支持全部 17 个工具
+- 选项 8 按 token 计费,模型列表由 `/v1/models` 实时发现并自动过滤非聊天模型,可交互选择或通过 `--models` 参数指定;支持全部 15 个工具
 - 国际站仅新加坡地域,不支持跨地域调用
 
-## 支持的工具(17 个)
+## 支持的工具(15 个)
 
 | # | 工具 | 接入方式 |
 |---|------|---------|
@@ -68,10 +68,8 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 8 | Kilo CLI | 自动安装 + /connect 引导配置 |
 | 9 | Kilo Code | VS Code 插件自动安装 + Provider 引导 |
 | 10 | Cline | VS Code 插件自动安装 + Provider 引导 |
-| 11 | Cursor | 手动下载 + Settings→Models 分步引导 |
 | 12 | TRAE | 手动下载 + 自定义模型分步引导 |
 | 13 | WorkBuddy | 手动下载 + 套餐模型全量自动写入 |
-| 14 | Lighthouse OpenClaw | 云端部署场景引导(轻量应用服务器) |
 | 15 | AutoClaw | 手动下载 + 自定义接入引导 |
 | 16 | QClaw | 手动下载 + 自定义接入引导 |
 | 17 | CoPaw | 手动获取 + 自定义接入引导 |

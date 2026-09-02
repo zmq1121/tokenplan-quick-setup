@@ -2,6 +2,24 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.0] - 2026-09-02
+
+### 变更
+
+- **工具列表 17 → 15**:移除 Cursor 与 Lighthouse OpenClaw。
+  Cursor 的自定义模型仅支持界面录入,无公开配置文件;Lighthouse 为
+  云端部署场景,不属于本机配置。两者保留在历史版本,后续按需恢复
+- TRAE 保持分步引导模式(直写其 state.vscdb 的条目无法通过启动时
+  的服务端校验,已在 CHANGELOG 存档逆向结论)
+
+### 修复(测试)
+
+- WorkBuddy 数量断言在本机受 CDN 陈旧缓存影响:子测试此前只钉了
+  `_REMOTE_CATALOG` 但 main() 内的 refresh 会重新拉取边缘缓存覆盖,
+  现在 refresh 一并 mock,断言彻底离线化
+
+[1.5.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.5.0
+
 ## [1.4.2] - 2026-09-02
 
 ### 模型目录更新(中国站个人版,官方文档 1823/130060)

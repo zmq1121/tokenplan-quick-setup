@@ -71,11 +71,11 @@ def sandbox(mod):
 
 def test_registry():
     mod = load_module()
-    check("17 个工具注册", len(mod.TOOLS) == 17)
+    check("15 个工具注册", len(mod.TOOLS) == 15)
     check("编号 1-6 为已验证工具(顺序稳定)",
           [t.key for t in mod.TOOLS[:6]] ==
           ["hermes", "codebuddy", "claude-code", "opencode", "openclaw", "dsh"])
-    check("索引 1-17 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 18)])
+    check("索引 1-15 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 16)])
     check("TOOL_BY_KEY 与 TOOLS 一致",
           set(mod.TOOL_BY_KEY) == {t.key for t in mod.TOOLS})
     check("每个配置器都有对应工具 key",
@@ -106,7 +106,7 @@ def test_registry_windows():
     check("Win: hermes 不自动安装", mod.get_install_command(mod.TOOL_BY_KEY["hermes"]) is None)
     check("Win: 桌面工具走手动下载",
           all(mod.should_manual_download(mod.TOOL_BY_KEY[k])
-              for k in ("cursor", "trae", "workbuddy", "qclaw", "copaw")))
+              for k in ("trae", "workbuddy", "qclaw", "copaw", "autoclaw")))
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ def test_doctor_config_probe():
     mod = load_module()
     tmp = sandbox(mod)
     tool = mod.TOOL_BY_KEY["codex"]
-    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["cursor"]) is None)
+    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["trae"]) is None)
 
     # 未配置:文件不存在 → False
     check("probe: 配置文件缺失 → False", mod.probe_config(tool) is False)
@@ -619,7 +619,7 @@ def test_main_interactions():
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
     check("EOF: run mode 默认", "无输入，默认" in out)
     check("EOF: 工具默认全部", "默认选择全部工具" in out)
-    check("EOF: 配置 17 个", "正在配置 17 个工具" in out)
+    check("EOF: 配置 15 个", "正在配置 15 个工具" in out)
 
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
                "--tools", "codex"], ["1"])
@@ -637,9 +637,14 @@ def test_main_interactions():
     _sp.run = _fake
     try:
         wb_home = sandbox(mod)
-        mod._REMOTE_CATALOG = None  # 数量断言用内置目录,不受 CDN 边缘缓存影响
+        # 数量断言用内置目录:必须连 refresh 一起 mock,否则 main() 真拉 CDN,
+        # 陈旧边缘缓存(v1.1.0 目录)会覆盖内置 catalog,数量随缓存漂移
+        mod._REMOTE_CATALOG = None
+        _real_refresh = mod.refresh_remote_catalog
+        mod.refresh_remote_catalog = lambda: None
         out = run(["x", "--plan", "personal-general", "--api-key", "sk-fake-key-1234567890",
                    "--tools", "workbuddy"], ["1"])
+        mod.refresh_remote_catalog = _real_refresh
         check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
         wb_models = json.loads((wb_home / ".workbuddy" / "models.json").read_text())
         check("WorkBuddy: 模型真实落盘", len(wb_models) == 10)  # personal-general 目录现为 10 模型

@@ -71,11 +71,11 @@ def sandbox(mod):
 
 def test_registry():
     mod = load_module()
-    check("15 个工具注册", len(mod.TOOLS) == 15)
+    check("14 个工具注册", len(mod.TOOLS) == 14)
     check("编号 1-6 为已验证工具(顺序稳定)",
           [t.key for t in mod.TOOLS[:6]] ==
           ["hermes", "codebuddy", "claude-code", "opencode", "openclaw", "dsh"])
-    check("索引 1-15 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 16)])
+    check("索引 1-14 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 15)])
     check("TOOL_BY_KEY 与 TOOLS 一致",
           set(mod.TOOL_BY_KEY) == {t.key for t in mod.TOOLS})
     check("每个配置器都有对应工具 key",
@@ -106,7 +106,7 @@ def test_registry_windows():
     check("Win: hermes 不自动安装", mod.get_install_command(mod.TOOL_BY_KEY["hermes"]) is None)
     check("Win: 桌面工具走手动下载",
           all(mod.should_manual_download(mod.TOOL_BY_KEY[k])
-              for k in ("trae", "workbuddy", "qclaw", "copaw", "autoclaw")))
+              for k in ("workbuddy", "qclaw", "copaw", "autoclaw")))
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ def test_doctor_config_probe():
     mod = load_module()
     tmp = sandbox(mod)
     tool = mod.TOOL_BY_KEY["codex"]
-    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["trae"]) is None)
+    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["qclaw"]) is None)
 
     # 未配置:文件不存在 → False
     check("probe: 配置文件缺失 → False", mod.probe_config(tool) is False)
@@ -619,7 +619,7 @@ def test_main_interactions():
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
     check("EOF: run mode 默认", "无输入，默认" in out)
     check("EOF: 工具默认全部", "默认选择全部工具" in out)
-    check("EOF: 配置 15 个", "正在配置 15 个工具" in out)
+    check("EOF: 配置 14 个", "正在配置 14 个工具" in out)
 
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
                "--tools", "codex"], ["1"])
@@ -664,7 +664,20 @@ def test_main_interactions():
 # 测试组: 结构一致性(仓库卫生)
 
 def test_repo_consistency():
+    mod = load_module()
     check("npm/lib 与主脚本字节一致", NPM_LIB.read_bytes() == SCRIPT.read_bytes())
+
+    # setup.bat:内嵌版本与 SHA256 必须与主脚本一致(改 setup.command 忘跑 sync 会被 CI 拦下)
+    import hashlib as _hl
+    bat_text = (REPO / "setup.bat").read_text(encoding="utf-8")
+    import re as _re
+    v_m = _re.search(r'set "SETUP_VERSION=([^"]+)"', bat_text)
+    h_m = _re.search(r'set "SETUP_SHA256=([0-9a-fA-F]{64})"', bat_text)
+    check("setup.bat: 内嵌版本与主脚本一致", v_m and v_m.group(1) == mod.VERSION)
+    check("setup.bat: 内嵌 SHA256 与主脚本一致",
+          h_m and h_m.group(1).lower() == _hl.sha256(SCRIPT.read_bytes()).hexdigest())
+    check("setup.bat: 下载 URL 固定版本(非 @main)",
+          "@main" not in bat_text and "releases/download" in bat_text)
 
     src = SCRIPT.read_text(encoding="utf-8")
     ver = re.search(r'^VERSION = "([^"]+)"', src, re.M)

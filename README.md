@@ -1,6 +1,6 @@
 # 腾讯云 Token Plan 一键接入
 
-将腾讯云大模型 API 的接入配置(服务端点、API Key、模型列表)自动写入 15 个 AI 编程工具,运行一次即可完成安装与配置。
+将腾讯云大模型 API 的接入配置(服务端点、API Key、模型列表)自动写入 14 个 AI 编程工具,运行一次即可完成安装与配置。
 
 面向新用户的完整操作指引见 [使用说明](docs/USER-GUIDE.md)。
 
@@ -27,7 +27,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 **转发文件**:上述文件可直接通过微信、QQ、邮件发送,接收方无需其它依赖。
 
-`setup.bat` 运行后自动下载主脚本(优先国内镜像源)并执行。Mac 上首次运行若提示无法验证开发者,右键文件选择"打开"并确认。
+`setup.bat` 运行后从固定版本的 Release 附件下载主脚本(多镜像回退)并做 SHA256 校验,通过后执行。Mac 上首次运行若提示无法验证开发者,右键文件选择"打开"并确认。
 
 ## 运行环境
 
@@ -51,10 +51,10 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 8 | 后付费 - 按量计费 | — | `https://tokenhub.tencentmaas.com/v1` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
 
 - 选项 1-7 为包月订阅,不同产品线的 API Key 不通用,请在对应控制台创建
-- 选项 8 按 token 计费,模型列表由 `/v1/models` 实时发现并自动过滤非聊天模型,可交互选择或通过 `--models` 参数指定;支持全部 15 个工具
+- 选项 8 按 token 计费,模型列表由 `/v1/models` 实时发现并自动过滤非聊天模型,可交互选择或通过 `--models` 参数指定;支持全部 14 个工具
 - 国际站仅新加坡地域,不支持跨地域调用
 
-## 支持的工具(15 个)
+## 支持的工具(14 个)
 
 | # | 工具 | 接入方式 |
 |---|------|---------|
@@ -68,7 +68,6 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 8 | Kilo CLI | 自动安装 + /connect 引导配置 |
 | 9 | Kilo Code | VS Code 插件自动安装 + Provider 引导 |
 | 10 | Cline | VS Code 插件自动安装 + Provider 引导 |
-| 12 | TRAE | 手动下载 + 自定义模型分步引导 |
 | 13 | WorkBuddy | 手动下载 + 套餐模型全量自动写入 |
 | 15 | AutoClaw | 手动下载 + 自定义接入引导 |
 | 16 | QClaw | 手动下载 + 自定义接入引导 |

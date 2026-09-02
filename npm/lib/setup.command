@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -176,6 +176,11 @@ def backup_file(path: Path) -> Optional[Path]:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = BACKUP_DIR / f"{path.name}.{ts}.bak"
     shutil.copy2(path, backup)
+    # 备份常含 API Key:无论源文件权限如何,一律收紧为仅属主可读写
+    try:
+        backup.chmod(0o600)
+    except OSError:
+        pass
     manifest = BACKUP_DIR / "manifest.jsonl"
     entry = {"backup": backup.name, "original": str(path), "ts": ts}
     with manifest.open("a", encoding="utf-8") as fh:
@@ -273,18 +278,30 @@ def write_json(
     _harden(path)
 
 
-def write_env(path: Path, remove_keys: Iterable[str] = (), **kv: str) -> None:
-    """Backup then rewrite a dotenv file, replacing only managed keys. Hardens to 0o600."""
+def write_env(
+    path: Path, remove_keys: Iterable[str] = (), export: bool = False, **kv: str
+) -> None:
+    """Backup then rewrite a dotenv file, replacing only managed keys. Hardens to 0o600.
+
+    export=True writes `export KEY=VALUE` lines for files that are `source`d
+    from shell rc files (vars must be exported to reach child processes).
+    User's own unmanaged lines are preserved verbatim.
+    """
     backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     old_lines = path.read_text().splitlines() if path.exists() else []
+
+    def _is_managed(line: str, keys: set) -> bool:
+        stripped = line
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):]
+        return any(stripped.startswith(f"{key}=") for key in keys)
+
     managed_keys = set(kv) | set(remove_keys)
-    keep_lines = [
-        line for line in old_lines
-        if not any(line.startswith(f"{key}=") for key in managed_keys)
-    ]
+    keep_lines = [line for line in old_lines if not _is_managed(line, managed_keys)]
+    prefix = "export " if export else ""
     for key, value in kv.items():
-        keep_lines.append(f"{key}={value}")
+        keep_lines.append(f"{prefix}{key}={value}")
     path.write_text("\n".join(line for line in keep_lines if line.strip()) + "\n")
     _harden(path)
 
@@ -737,19 +754,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="trae",
-        name="TRAE",
-        backend="desktop",
-        check_exe=None,
-        download_url="https://www.trae.cn",
-        usage_lines=(
-            "下载安装: https://www.trae.cn",
-            "打开 设置 → 模型服务，找到自定义模型/自定义 Provider 入口",
-            "接入地址(Base URL): {base_url}",
-            "API Key 与模型 ID 按套餐填写，入口名称以当前版本设置页为准",
-        ),
-    ),
-    ToolSpec(
         key="workbuddy",
         name="WorkBuddy",
         backend="desktop",
@@ -916,12 +920,13 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
         info("已写入 Windows 用户环境变量，重新打开终端后生效")
         return
     env_path = cfg_path(".codebuddy", "tokenplan.env")
-    env_path.write_text(
-        f"export CODEBUDDY_API_KEY={json.dumps(api_key)}\n"
-        f"export OPENAI_API_KEY={json.dumps(api_key)}\n"
-        f"export OPENAI_BASE_URL={json.dumps(base_url)}\n"
+    write_env(
+        env_path,
+        export=True,
+        CODEBUDDY_API_KEY=api_key,
+        OPENAI_API_KEY=api_key,
+        OPENAI_BASE_URL=base_url,
     )
-    _harden(env_path)
     record_state("env_files", str(env_path))
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
@@ -1877,8 +1882,7 @@ def install_codex_shell_env(api_key: str) -> None:
         info("已写入 Windows 用户环境变量 TOKENPLAN_API_KEY，重新打开终端后生效")
         return
     env_path = cfg_path(".codex", "tokenplan.env")
-    env_path.write_text(f"export TOKENPLAN_API_KEY={json.dumps(api_key)}\n")
-    _harden(env_path)
+    write_env(env_path, export=True, TOKENPLAN_API_KEY=api_key)
     record_state("env_files", str(env_path))
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")

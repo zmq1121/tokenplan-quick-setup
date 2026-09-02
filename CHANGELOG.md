@@ -2,6 +2,29 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.6.0] - 2026-09-02
+
+### 变更
+
+- **工具列表 15 → 14**:移除 TRAE。火山方舟官方 arkcli 的二进制中
+  明确写着 "Trae does not support model/provider configuration"——
+  TRAE 的模型列表为服务端管控,厂商级 CLI 也无法写入,本安装器维持
+  引导模式已无意义,直接移除(逆向结论存档于 1.5.0 条目)
+
+### 安全加固(对标 arkcli)
+
+- **setup.bat 下载完整性校验**:改从固定版本 Release 附件下载主脚本
+  (不再跟随 @main 漂移),并用 certutil 做 SHA256 校验,镜像被篡改
+  或文件损坏时拒绝执行;版本号与哈希由 `scripts/sync_npm_lib.py`
+  自动注入,CI 校验三者一致,忘跑同步会直接红
+- **备份文件权限收紧**:`~/.tokenplan-backups/ 下的备份一律 chmod
+  0600(此前继承源文件权限,源为 0644 时含 Key 的备份也 0644)
+- **env 文件统一走 write_env**:CodeBuddy/Codex 的 sourced env 此前
+  直写无备份,现在备份 + 保留用户已有行 + 0600;write_env 新增
+  export 模式(source 场景变量需导出)
+
+[1.6.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.6.0
+
 ## [1.5.0] - 2026-09-02
 
 ### 变更

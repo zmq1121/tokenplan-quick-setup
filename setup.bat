@@ -37,14 +37,19 @@ exit /b 1
 echo   ✅ Python 已就绪 (%PY_CMD%)
 echo.
 
-REM ── 2. 下载主脚本（多镜像依次回退） ────────────────────────────
+REM ── 2. 下载主脚本（固定版本镜像，多源回退） ────────────────────
+REM SETUP_VERSION / SETUP_SHA256 由 scripts/sync_npm_lib.py 自动注入,
+REM 手动修改无效——修改 setup.command 后必须重新运行同步脚本。
+set "SETUP_VERSION=1.6.0"
+set "SETUP_SHA256=5b44f735502da966ee3a9b217e4916f3b5b6b6cf20f40fe8eb690efa32989f92"
+
 set "TMPFILE=%TEMP%\tokenplan-setup.py"
 
-set "URL_1=https://cdn.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@main/setup.command"
-set "URL_2=https://fastly.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@main/setup.command"
-set "URL_3=https://raw.githubusercontent.com/zmq1121/tokenplan-quick-setup/main/setup.command"
+set "URL_1=https://github.com/zmq1121/tokenplan-quick-setup/releases/download/v%SETUP_VERSION%/setup.command"
+set "URL_2=https://cdn.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@v%SETUP_VERSION%/setup.command"
+set "URL_3=https://fastly.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@v%SETUP_VERSION%/setup.command"
 
-echo   → 正在下载安装脚本...
+echo   → 正在下载安装脚本 (v%SETUP_VERSION%)...
 set "DOWNLOADED="
 for %%U in ("%URL_1%" "%URL_2%" "%URL_3%") do (
     if not defined DOWNLOADED (
@@ -60,21 +65,29 @@ if not defined DOWNLOADED (
     echo.
     echo   可选镜像（手动下载后重命名为 setup.py 运行）：
     echo     %URL_1%
-    echo     %URL_3%
+    echo     %URL_2%
     echo.
     pause
     exit /b 1
 )
 
-REM ── 3. 校验下载内容确实是 Python 脚本（防止镜像返回错误页） ────
-findstr /C:"python3" /C:"import" "%TMPFILE%" >nul 2>&1
-if errorlevel 1 (
-    echo   ❌ 下载内容校验失败，文件可能不完整
+REM ── 3. SHA256 完整性校验（防镜像篡改/损坏） ────────────────────
+set "FILE_HASH="
+for /f "skip=1 tokens=1 delims= " %%H in ('certutil -hashfile "%TMPFILE%" SHA256 2^>nul ^| findstr /r /i "^[0-9a-f][0-9a-f]*$"') do (
+    if not defined FILE_HASH set "FILE_HASH=%%H"
+)
+
+if /i not "%FILE_HASH%"=="%SETUP_SHA256%" (
+    echo   ❌ 完整性校验失败：下载内容与 v%SETUP_VERSION% 预期不符
+    echo      文件可能损坏或镜像被篡改，已中止运行。
+    echo.
+    echo   请从官方 Release 重新获取 setup.bat：
+    echo     https://github.com/zmq1121/tokenplan-quick-setup/releases
     del "%TMPFILE%" >nul 2>&1
     pause
     exit /b 1
 )
-echo   ✅ 下载完成
+echo   ✅ SHA256 校验通过
 echo.
 
 REM ── 4. 运行（透传所有参数，如 doctor / --tools 等） ───────────

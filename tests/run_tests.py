@@ -411,7 +411,11 @@ def test_workbuddy_config():
           [e for e in data if e["id"] == "deepseek/deepseek-v4-flash-vision-exp"][0]["supportsImages"] is True)
     check("WorkBuddy: 文本模型不标图片",
           [e for e in data if e["id"] == "glm-5.3"][0]["supportsImages"] is False)
-    check("WorkBuddy: 文件权限 600", models.stat().st_mode & 0o777 == 0o600)
+    if sys.platform == "win32":
+        # NTFS 无 POSIX 权限位;Windows 契约 = 文件生成即可
+        check("WorkBuddy: 文件生成(Windows 无 POSIX 位)", models.exists())
+    else:
+        check("WorkBuddy: 文件权限 600", models.stat().st_mode & 0o777 == 0o600)
     # 幂等验证
     mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
     try:
@@ -590,6 +594,8 @@ def test_main_interactions():
     check("--tools: 只配指定工具", "正在配置 1 个工具" in out and "Codex 已配置" in out)
 
     # 手动下载类但有配置器的工具(WorkBuddy):配置必须照写,不能只提示下载
+    # 注意:前面的 EOF 子测试已在旧沙箱写过全量配置,这里必须换全新沙箱,
+    # 否则 merge 语义会把两个套餐的条目合并,数量断言就依赖执行顺序了
     import subprocess as _sp
     _real = _sp.run
     def _fake(cmd, *a, **k):
@@ -598,10 +604,12 @@ def test_main_interactions():
         return _real(cmd, *a, **k)
     _sp.run = _fake
     try:
+        wb_home = sandbox(mod)
+        mod._REMOTE_CATALOG = None  # 数量断言用内置目录,不受 CDN 边缘缓存影响
         out = run(["x", "--plan", "personal-general", "--api-key", "sk-fake-key-1234567890",
                    "--tools", "workbuddy"], ["1"])
         check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
-        wb_models = json.loads((mod.HOME / ".workbuddy" / "models.json").read_text())
+        wb_models = json.loads((wb_home / ".workbuddy" / "models.json").read_text())
         check("WorkBuddy: 模型真实落盘", len(wb_models) == 8)
     finally:
         _sp.run = _real

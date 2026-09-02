@@ -1,177 +1,116 @@
-# 腾讯云 Token Plan 一键接入 · 小白使用说明
+# 腾讯云大模型 API · 一键接入说明
 
-> 你不需要懂命令行、不需要懂配置文件。
-> 跟着下面的步骤走，每一步告诉你"在哪里、点什么、输入什么"。
+## 这是什么
 
----
+本工具是一个**配置生成器**(命令行安装器),不是 skill、不是插件,也不是模型本身。
 
-## 第 0 步：开始之前，准备好这两样
+它做的事情只有一件:把你订阅的腾讯云大模型 API(Token Plan 套餐或后付费按量计费)的接入参数——**服务端点、API Key、模型列表**——自动写入 Claude Code、Codex、Cursor 等 17 个 AI 编程工具的配置文件。
 
-1. **你已经订阅了腾讯云 Token Plan 套餐**（个人版或企业版都行）
-2. **你的 API Key**：去这个网址拿 👉 https://console.cloud.tencent.com/tokenhub/apikey
-   - 打开后能看到一串 `sk-` 开头的字符，那就是 Key
-   - 没有的话，在页面上点"创建"，复制保存好
+- 运行一次即可,之后正常打开那些工具就能用
+- 不常驻后台、不代理流量、不上传任何数据
+- 随时可用 `uninstall` 完整还原
 
-> ⚠️ API Key 就像银行卡密码，**不要发给别人、不要截图发群里**。
+> 与 skill 的区别:skill 是给 AI 工具扩展能力的插件;本工具帮你**配置这些工具本身**,两者互补。
 
----
+## 准备:获取 API Key
 
-## 第 1 步：拿到安装文件（选你电脑对应的）
+API Key(`sk-` 开头)在腾讯云控制台获取,**不同套餐入口不同**:
 
-### 我是 Mac（苹果电脑）
+| 你订阅的产品 | API Key 获取地址 |
+|------|------|
+| 个人版 - 通用 | https://console.cloud.tencent.com/tokenhub/tokenplan/common/api-key |
+| 个人版 - Hy(混元) | https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key |
+| 企业版(专业/轻享) | https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key |
+| 国际站(新加坡) | https://console.cloud.tencent.com/tokenhub/apikey |
+| 后付费 - 按量计费 | https://console.cloud.tencent.com/lkeap/apikey |
 
-找给你装工具的人（或群文件）要这个文件：
+也可以先运行安装器:选择套餐后,屏幕会显示该套餐对应的获取地址,前往即可。
 
-**`setup.command`**
+**注意**:API Key 等同于账户凭证,不要转发给他人或截图外发。企业 Key 由管理员在 TokenHub 控制台分发。
 
-下载后放在桌面就行（其实放哪都行，桌面好找）。
-
-### 我是 Windows
-
-要这个文件：
-
-**`setup.bat`**
-
-同样下载到桌面。
-
----
-
-## 第 2 步：运行它
+## 运行
 
 ### Mac
 
-1. 按 `Command + 空格`，输入"终端"（或"Terminal"），回车打开
-2. 在终端里输入这行，然后按回车：
+1. 获取 `setup.command` 文件(群文件或同事转发),放到任意目录
+2. 打开"终端"(Spotlight 搜索"终端"或"Terminal")
+3. 执行(将文件拖入终端窗口可自动填充路径):
 
 ```bash
-bash ~/Desktop/setup.command
+bash setup.command
 ```
-
-> 如果文件不在桌面：把 `setup.command` 直接拖进终端窗口，会自动填路径，前面加个 `bash ` 和空格就行。
 
 ### Windows
 
-**直接双击 `setup.bat`** 就行。
+双击 `setup.bat`。
 
-> - 如果 Windows 问"是否允许此应用更改设备"，点"是"
-> - 如果杀毒软件拦截，选择"允许运行"（这个脚本只写你自己的配置文件，不干别的）
-> - 第一次运行会自动下载主程序，需要等十几秒到一分钟，看你网速
+- 系统询问"是否允许更改"时选择"是"
+- 首次运行会自动下载主程序(约需十几秒至一分钟)
+- 若安全软件提示,选择允许:本工具仅写入本机工具配置文件
 
----
+## 交互流程
 
-## 第 3 步：跟着屏幕提示走（一共 4 个问题）
+安装器依次提出四个问题:
 
-打开后长这样，一步步来：
+**① 选择套餐** —— 按订阅的产品选择对应编号。共 8 项:中国站个人版 2 项、企业版 2 项,国际站 3 项,后付费 1 项。不确定时,以订阅页面显示的名称为准。
 
-```
-╔══════════════════════════════════════════════╗
-║   腾讯云 Token Plan — 一键接入 CLI          ║
-║   只需 API Key，其余尽可能自动               ║
-╚══════════════════════════════════════════════╝
-```
+**② 输入 API Key** —— 粘贴后回车。安装器会实时验证:
+- 验证通过 → 继续
+- 验证失败 → 检查是否复制完整、Key 与套餐是否匹配,重新粘贴
 
-### 问题 ①：选套餐（输入数字，回车）
+**③ 选择运行模式** —— 直接回车(标准模式)。
 
-```
-[1] 个人版 - 通用
-[2] 个人版 - Hy（混元）
-[3] 企业版 - 专业套餐
-[4] 企业版 - 轻享套餐
-[5] 国际站 - 个人版（新加坡）
-[6] 国际站 - 企业版专业套餐（新加坡）
-[7] 国际站 - 企业版轻享套餐（新加坡）
-```
+**④ 选择工具** —— 列出 17 个工具:
+- 回车 = 全部配置(推荐)
+- 输入编号(逗号分隔,如 `3,7,13`)= 只配置指定工具
 
-**怎么选？**
-- 公司给你买的 → 问公司是"专业"还是"轻享"，一般选 `3`
-- 自己买的 → 选 `1`
-- 人在海外/公司用的国际站 → 选 `5`、`6` 或 `7`
-- 拿不准 → 看你订阅页面写的名字，和上面哪个对得上选哪个
+之后自动执行:未安装的工具自动安装,配置自动写入,完成后逐项显示结果与使用方法。
 
-### 问题 ②：粘贴 API Key
+桌面应用(Cursor、TRAE 等)无法自动写入配置,安装器会输出需要手动填写的字段值(端点地址、Key),在应用设置中粘贴一次即可。
 
-屏幕提示"请粘贴 API Key"时：
+## 完成后如何使用
 
-1. 回到浏览器，复制你的 Key（`sk-` 开头那一串）
-2. 回到终端窗口：**Mac 按 `Command+V`，Windows 直接 `Ctrl+V` 或 右键**
-3. 按回车
+新开一个终端窗口,输入工具名启动:
 
-脚本会自动验证 Key 对不对：
-- ✅ 显示"验证通过" → 继续
-- ❌ 显示"验证失败" → 检查是不是复制少了/多了空格，重新粘贴
-
-### 问题 ③：选运行模式
-
-直接**回车**（默认"标准模式"就行）。
-
-### 问题 ④：选工具
-
-屏幕会列出 17 个工具（Claude Code、Codex、Cursor……）：
-
-- **直接回车 = 全部配置**（推荐，想用哪个用哪个）
-- 只想要某几个 → 输入编号，用逗号隔开，比如：`3,7,9`
-
-然后它就开始自动干活了：没装的工具自动装，配置自动写。
-装完每个工具会打 ✓。
-
----
-
-## 第 4 步：装完了，怎么用？
-
-安装器最后会打印每个工具怎么启动。最常用的：
-
-| 工具 | 怎么启动 |
+| 工具 | 启动命令 |
 |------|---------|
-| Claude Code | 终端输入 `claude` |
-| Codex | 终端输入 `codex` |
-| CodeBuddy | 终端输入 `codebuddy` |
-| Cursor | 打开 Cursor 应用，模型已在列表里 |
+| Claude Code | `claude` |
+| Codex CLI | `codex` |
+| CodeBuddy Code | `codebuddy` |
+| WorkBuddy | 打开应用,模型列表已自动写入 |
 
-> 💡 桌面应用（Cursor、TRAE 等）没法自动写配置，安装器会给你一段
-> "Base URL + API Key"让你在应用设置里填一次，照着复制粘贴就行。
+支持的 17 个工具:Hermes Agent、CodeBuddy Code、Claude Code、OpenCode、OpenClaw、DeepSeek Harness、Codex CLI、Kilo CLI、Kilo Code、Cline、Cursor、TRAE、WorkBuddy、Lighthouse OpenClaw、AutoClaw、QClaw、CoPaw。
 
-**新开一个终端窗口**（Mac: `Command+N`），输入工具名就能用了。
+## 维护命令
 
----
+```bash
+bash setup.command doctor      # 诊断:检查环境与各工具配置状态(只读,不修改)
+bash setup.command repair      # 修复:重写配置文件(不重装程序)
+bash setup.command uninstall   # 卸载:从备份还原全部修改
+```
 
 ## 常见问题
 
-### Q：双击 setup.command（Mac）没反应 / 用文本编辑器打开了
-Mac 出于安全不让直接双击。用上面"第 2 步"的终端方式运行即可。
+**Q: Mac 双击 setup.command 无反应或被文本编辑器打开**
+macOS 默认不执行未知来源脚本。请使用上文"运行"一节的终端方式。
 
-### Q：提示"python3: command not found"
-Mac：装一下命令行工具——终端输入 `xcode-select --install`，装完重跑。
-Windows：装 Python，地址 https://www.python.org/downloads （安装时勾选 **Add to PATH**）。
+**Q: 提示 python3: command not found**
+Mac:执行 `xcode-select --install` 安装命令行工具后重试。
+Windows:从 https://www.python.org/downloads 安装(勾选 Add to PATH)。
 
-### Q：验证 API Key 一直失败
-1. Key 复制完整了吗？`sk-` 开头，通常挺长一串
-2. Key 和套餐对得上吗？（个人版的 Key 配企业版套餐会失败）
-3. 还不行 → 去控制台重新生成一个 Key
+**Q: API Key 验证失败**
+1. 确认 Key 复制完整(`sk-` 开头的完整字符串)
+2. 确认 Key 与所选套餐匹配(不同产品线的 Key 不通用)
+3. 仍失败时,到对应控制台重新创建 Key
 
-### Q：装到一半断了 / 网络超时
-重新跑一遍就行。已装好的会显示"已安装"跳过，不会重复装。
+**Q: 后付费(选项 8)与套餐的区别**
+套餐(Token Plan)是包月订阅,模型固定;后付费按实际用量计费,模型列表动态变化。后付费模式需联网获取模型列表,安装器会自动完成。
 
-### Q：想换套餐 / 换 Key
-重新运行一次安装器，重新选就行，它会覆盖旧配置。
+**Q: 安装中断或网络超时**
+重新运行即可。已完成的步骤会跳过,不会重复安装。
 
-### Q：出问题了想检查 / 想完全卸载
-```bash
-bash setup.command doctor      # 体检：哪里不对了（只查不改）
-bash setup.command repair      # 修复：配置坏了重新写（不重装程序）
-bash setup.command uninstall   # 卸载：恢复到你装之前的样子
-```
+**Q: 更换套餐或 Key**
+重新运行安装器选择新套餐即可,配置会被覆盖更新。
 
-### Q：杀毒软件/公司安全软件报警
-脚本只做三件事：下载安装 AI 工具、写工具的配置文件、帮你备份原配置。
-不收集信息、不外传数据。被拦截时选择"允许"即可；公司电脑可把脚本路径报给 IT 加白。
-
-### Q：支持哪些工具？
-17 个：Hermes Agent、CodeBuddy Code、Claude Code、OpenCode、OpenClaw、
-DeepSeek Harness、Codex CLI、Kilo CLI、Kilo Code、Cline、Cursor、TRAE、
-WorkBuddy、Lighthouse OpenClaw、AutoClaw、QClaw、CoPaw。
-
----
-
-## 一句话总结
-
-> **下载文件 → 双击/一条命令 → 选套餐 → 粘 Key → 回车回车回车 → 完事。**
+**Q: 公司安全软件报警**
+本工具仅执行三类操作:安装 AI 编程工具、写入工具配置文件、备份原配置。不收集信息、不外传数据。如有需要,可将工具路径提交 IT 部门加白。

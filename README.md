@@ -223,7 +223,7 @@ bash setup.command --version
 ## 开发与测试
 
 ```bash
-python3 tests/run_tests.py          # 全部回归测试（106 项，零依赖）
+python3 tests/run_tests.py          # 全部回归测试（118 项，零依赖）
 python3 tests/run_tests.py codex    # 只跑某一组
 python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 构建产物
 ```

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -460,6 +460,12 @@ MODEL_CATALOG = {
             "Auto 智能路由: auto",
         ),
     },
+    # 后付费(LKEAP 按量计费):模型库动态变化,不做内置策展;
+    # 运行时通过 /v3/models 实时发现(端点已验证存在),见 discover_postpaid_models()。
+    "postpaid": {
+        "default": "",
+        "display": (),
+    },
 }
 
 # Claude Code exposes three fixed custom slots. Keep these mappings separate from
@@ -542,6 +548,14 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="新加坡地域;该套餐仅支持 Auto 模型",
+    ),
+    "8": PlanSpec(
+        choice="8",
+        key="postpaid",
+        display_name="后付费 - 按量计费（大模型服务平台）",
+        base_url="https://api.lkeap.cloud.tencent.com/v3",
+        key_url="https://console.cloud.tencent.com/lkeap/apikey",
+        only_note="按 token 计费(非套餐订阅);模型列表由 API 实时发现,需联网",
     ),
 }
 
@@ -1291,8 +1305,68 @@ def notify_upgrade_available() -> None:
     dim("建议重新获取安装文件,或使用: npx tokenplan-setup@latest")
 
 
+# 后付费:运行时通过 /v3/models 发现的模型列表(verify 阶段填充)
+_POSTPAID_DISCOVERED: Optional[List[str]] = None
+
+# 后付费默认模型的挑选优先级(命中即用,全不中用第一个)
+_POSTPAID_PREFERRED = ("deepseek-v3.2", "deepseek-v3.1", "deepseek-r1", "deepseek-v3")
+
+
+def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]:
+    """Fetch the live model list from the postpaid /models endpoint.
+
+    Also serves as key verification for the postpaid plan: a 200 with a
+    model list means the key is valid. Returns None on any failure.
+    """
+    global _POSTPAID_DISCOVERED
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode(errors="ignore"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        ids = [
+            item["id"]
+            for item in (data or [])
+            if isinstance(item, dict) and item.get("id")
+        ]
+        if ids:
+            _POSTPAID_DISCOVERED = ids
+            return ids
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
+        warn(f"API 返回错误 [{exc.code}]: {_format_api_error(body)}")
+    except Exception as exc:
+        warn(f"连接失败: {exc}")
+    return None
+
+
+def _postpaid_catalog() -> Optional[Dict[str, object]]:
+    """Build a catalog view from the discovered postpaid models."""
+    if not _POSTPAID_DISCOVERED:
+        return None
+    ids = _POSTPAID_DISCOVERED
+    preferred = next((m for m in _POSTPAID_PREFERRED if m in ids), ids[0])
+    return {
+        "default": preferred,
+        "display": tuple(f"{mid}: {mid}" for mid in ids),
+    }
+
+
 def get_model_catalog(plan_key: str) -> Dict[str, object]:
-    """Remote catalog first (when refreshed), built-in MODEL_CATALOG as fallback."""
+    """Remote catalog first (when refreshed), built-in MODEL_CATALOG as fallback.
+
+    Postpaid is special: its model list is discovered live from the API
+    (dynamic catalog, no built-in curation); discovery result wins.
+    """
+    if plan_key == "postpaid":
+        discovered = _postpaid_catalog()
+        if discovered:
+            return discovered
+        return MODEL_CATALOG.get(plan_key, {"default": "", "display": ()})
     remote = (_REMOTE_CATALOG or {}).get(plan_key)
     if isinstance(remote, dict) and remote.get("default") and remote.get("display"):
         return remote
@@ -1333,6 +1407,17 @@ def _format_api_error(body: str, limit: int = 160) -> str:
 
 def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
     """Probe the endpoint with a 1-token chat completion using the plan's default model."""
+    if plan.key == "postpaid":
+        # 后付费:GET /models 即验证(200+列表 = Key 有效),同时完成模型发现
+        spinner = Spinner("验证 API Key 并发现模型...")
+        spinner.start()
+        ids = discover_postpaid_models(base_url, api_key)
+        spinner.stop(success=ids is not None)
+        if ids:
+            ok(f"Key 有效,发现 {len(ids)} 个可用模型")
+            return True
+        warn("后付费 Key 验证失败或模型列表获取失败(需联网)")
+        return False
     spinner = Spinner("验证 API Key...")
     spinner.start()
     try:
@@ -1398,11 +1483,28 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Write ~/.claude/settings.json env block + model slots + tokenplan launcher."""
-    anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
+    if base_url.rstrip("/").endswith("/v3"):
+        # 后付费:Anthropic 兼容端点(已探活,与 /v3 并列)
+        anthropic_url = base_url.rstrip("/") + "/anthropic"
+    else:
+        anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
     catalog = get_model_catalog(plan.key)
     default_model = str(catalog["default"])
     model_ids = get_model_ids(plan.key)
     claude_slots = CLAUDE_MODEL_SLOTS.get(plan.key, {})
+    if not claude_slots and plan.key == "postpaid" and model_ids:
+        # 后付费无固定槽位映射:从发现列表按能力倾向挑选
+        def _pick(*keywords: str) -> str:
+            for kw in keywords:
+                hit = next((m for m in model_ids if kw in m), "")
+                if hit:
+                    return hit
+            return model_ids[0]
+        claude_slots = {
+            "opus": _pick("v3.2", "v3.1", "r1", "pro"),
+            "sonnet": _pick("v3.1", "v3", "chat"),
+            "haiku": _pick("turbo", "flash", "lite"),
+        }
     env = {
         "ANTHROPIC_AUTH_TOKEN": api_key,
         "ANTHROPIC_BASE_URL": anthropic_url,
@@ -2431,14 +2533,26 @@ def main() -> None:
     notify_upgrade_available()
     print()
 
-    remote_models = fetch_remote_models(base_url, api_key)
-    if remote_models:
-        catalog_ids = get_model_ids(plan.key)
-        missing = [m for m in catalog_ids if m not in remote_models]
-        if missing:
-            warn(f"以下目录模型未出现在 API 模型列表中（可能已下线）: {', '.join(missing)}")
+    if plan.key == "postpaid":
+        # 后付费:目录即发现结果,无交叉检查
+        if _POSTPAID_DISCOVERED:
+            ok(f"后付费模型列表已获取（{len(_POSTPAID_DISCOVERED)} 个）")
         else:
-            ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
+            # verify 失败后用户仍选择继续:再试一次发现,失败则中止
+            ids = discover_postpaid_models(base_url, api_key)
+            if not ids:
+                warn("后付费模式需要联网获取模型列表,无法继续")
+                return
+            ok(f"后付费模型列表已获取（{len(ids)} 个）")
+    else:
+        remote_models = fetch_remote_models(base_url, api_key)
+        if remote_models:
+            catalog_ids = get_model_ids(plan.key)
+            missing = [m for m in catalog_ids if m not in remote_models]
+            if missing:
+                warn(f"以下目录模型未出现在 API 模型列表中（可能已下线）: {', '.join(missing)}")
+            else:
+                ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
     print()
 
     repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())

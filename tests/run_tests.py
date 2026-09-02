@@ -83,7 +83,9 @@ def test_registry():
     check("plugin 工具都有扩展 ID",
           all(t.key in mod.PLUGIN_EXTENSION_IDS for t in mod.TOOLS if t.backend == "plugin"))
     check("backend 全部已注册", all(t.backend in mod.BACKEND_REGISTRY for t in mod.TOOLS))
-    check("7 个套餐(4 中国站 + 3 国际站)", len(mod.PLAN_CATALOG) == 7)
+    check("8 个套餐(4 中国站 + 3 国际站 + 1 后付费)", len(mod.PLAN_CATALOG) == 8)
+    check("后付费套餐走 lkeap 端点",
+          mod.PLAN_CATALOG["8"].base_url == "https://api.lkeap.cloud.tencent.com/v3")
     check("国际站套餐走 intl 端点",
           all(p.base_url.startswith("https://tokenhub-intl.")
               for p in mod.PLAN_CATALOG.values() if p.key.startswith("intl-")))
@@ -232,6 +234,73 @@ def test_permissions():
 
 
 # ---------------------------------------------------------------------------
+# 测试组: 后付费(按量计费)
+
+def test_postpaid():
+    mod = load_module()
+    tmp = sandbox(mod)
+    mod._REMOTE_CATALOG = None
+    mod._POSTPAID_DISCOVERED = None
+    plan = mod.PLAN_CATALOG["8"]
+    base = "https://api.lkeap.cloud.tencent.com/v3"
+
+    check("后付费: 选项 8 存在且端点正确",
+          plan.key == "postpaid" and plan.base_url == base)
+    check("后付费: Key 控制台指向 lkeap",
+          "lkeap" in plan.key_url)
+
+    # 未发现时:目录为空,default 为空串
+    empty_catalog = mod.get_model_catalog("postpaid")
+    check("后付费: 未发现时目录为空", empty_catalog["default"] == "" and not empty_catalog["display"])
+
+    # 模拟发现成功
+    mod._POSTPAID_DISCOVERED = ["deepseek-v3.2", "deepseek-r1", "hunyuan-turbos", "deepseek-chat"]
+    catalog = mod.get_model_catalog("postpaid")
+    ids = mod.get_model_ids("postpaid")
+    check("后付费: 发现后目录为发现列表", set(ids) == set(mod._POSTPAID_DISCOVERED))
+    check("后付费: 默认模型优先 deepseek-v3.2", catalog["default"] == "deepseek-v3.2")
+
+    # 模拟无 v3.2 时的次优选择
+    mod._POSTPAID_DISCOVERED = ["hunyuan-turbos", "deepseek-chat"]
+    check("后付费: 无首选时回退第一个", mod.get_model_catalog("postpaid")["default"] == "hunyuan-turbos")
+
+    # Claude 动态槽
+    mod._POSTPAID_DISCOVERED = ["deepseek-v3.2", "deepseek-chat", "hunyuan-turbo"]
+    import contextlib, io as _io
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.configure_claude_code(base, "sk-pp-test-1234567890", plan)
+    settings = json.loads((tmp / ".claude" / "settings.json").read_text())
+    env = settings.get("env", {})
+    check("后付费: Claude anthropic 端点", env.get("ANTHROPIC_BASE_URL") == base + "/anthropic")
+    check("后付费: Claude opus 槽选 v3.2", env.get("ANTHROPIC_DEFAULT_OPUS_MODEL") == "deepseek-v3.2")
+    check("后付费: Claude haiku 槽选 turbo", env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") == "hunyuan-turbo")
+
+    # verify:发现失败返回 False
+    def _fail(url, key):
+        return None
+    orig = mod.discover_postpaid_models
+    mod.discover_postpaid_models = lambda u, k: None
+    with contextlib.redirect_stdout(_io.StringIO()):
+        passed = mod.verify_api_key(base, "sk-bad", plan)
+    check("后付费: 发现失败 → verify False", passed is False)
+    mod.discover_postpaid_models = orig
+
+    # WorkBuddy 用发现列表(进程检测必须 mock:测试不依赖宿主机是否开着 WorkBuddy)
+    mod._POSTPAID_DISCOVERED = ["deepseek-v3.2", "deepseek-chat"]
+    real_run = mod.subprocess.run
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+    try:
+        with contextlib.redirect_stdout(_io.StringIO()):
+            mod.configure_workbuddy(base, "sk-pp-2", plan)
+    finally:
+        mod.subprocess.run = real_run
+    wb = json.loads((tmp / ".workbuddy" / "models.json").read_text())
+    check("后付费: WorkBuddy 写入发现模型", {e["id"] for e in wb} == {"deepseek-v3.2", "deepseek-chat"})
+
+    mod._POSTPAID_DISCOVERED = None
+
+
+# ---------------------------------------------------------------------------
 # 测试组: WorkBuddy 全量模型写入
 
 def test_workbuddy_config():
@@ -252,8 +321,13 @@ def test_workbuddy_config():
 
     import contextlib, io as _io
     buf = _io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        mod.configure_workbuddy(base, key, plan)
+    real_run = mod.subprocess.run
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.configure_workbuddy(base, key, plan)
+    finally:
+        mod.subprocess.run = real_run
 
     data = json.loads(models.read_text())
     ids = [e["id"] for e in data]
@@ -272,8 +346,12 @@ def test_workbuddy_config():
           [e for e in data if e["id"] == "glm-5.3"][0]["supportsImages"] is False)
     check("WorkBuddy: 文件权限 600", models.stat().st_mode & 0o777 == 0o600)
     # 幂等验证
-    with contextlib.redirect_stdout(_io.StringIO()):
-        mod.configure_workbuddy(base, key, plan)
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+    try:
+        with contextlib.redirect_stdout(_io.StringIO()):
+            mod.configure_workbuddy(base, key, plan)
+    finally:
+        mod.subprocess.run = real_run
     ids2 = [e["id"] for e in json.loads(models.read_text())]
     check("WorkBuddy: 重跑后条目数不变(幂等)", len(ids2) == len(ids))
     check("WorkBuddy: doctor 签名存在", mod.probe_config(mod.TOOL_BY_KEY["workbuddy"]) is True)
@@ -523,8 +601,11 @@ def test_remote_catalog():
     plans = data.get("plans", {})
     check("目录: models.json 套餐 key 与 PLAN_CATALOG 对齐",
           set(plans) == {p.key for p in mod.PLAN_CATALOG.values()})
-    check("目录: 每个套餐都有 default+display",
-          all(plans[k].get("default") and plans[k].get("display") for k in plans))
+    check("目录: 每个套餐都有 default+display(后付费除外:运行时发现)",
+          all(
+              (plans[k].get("display") or k == "postpaid")
+              for k in plans
+          ) and all("default" in plans[k] for k in plans))
     check("目录: display 行都有 ':' 分隔",
           all(":" in line for p in plans.values() for line in p["display"]))
 
@@ -542,6 +623,7 @@ TEST_GROUPS = [
     ("codex", test_codex_config),
     ("uninstall", test_uninstall),
     ("permissions", test_permissions),
+    ("postpaid", test_postpaid),
     ("workbuddy", test_workbuddy_config),
     ("list-merge", test_write_json_list_merge),
     ("doctor-probe", test_doctor_config_probe),

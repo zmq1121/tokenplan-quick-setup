@@ -280,6 +280,57 @@ def test_postpaid():
     check("后付费: 全被过滤时兜底原始列表",
           mod.get_model_ids("postpaid") == ["kling-video-v3", "seedream-image-v5.0-pro"])
 
+    # ── 模型自选 ──
+    mod._POSTPAID_DISCOVERED = ["glm-5.3-flash", "glm-5.3", "deepseek-v4-pro",
+                                "kling-video-v3", "kimi-k3"]
+    mod._POSTPAID_SELECTED = None
+    chosen = mod.set_postpaid_selection(["kimi-k3", "glm-5.3", "no-such-model"])
+    check("自选: 未知模型被忽略,有效项按发现顺序",
+          chosen == ["glm-5.3", "kimi-k3"])
+    check("自选: 目录只含所选", mod.get_model_ids("postpaid") == ["glm-5.3", "kimi-k3"])
+    check("自选: 默认模型在所选中回退",
+          mod.get_model_catalog("postpaid")["default"] == "glm-5.3")
+    # 清空选择恢复全部
+    mod._POSTPAID_SELECTED = None
+    check("自选: 清空后恢复全部",
+          mod.get_model_ids("postpaid") == ["glm-5.3-flash", "glm-5.3", "deepseek-v4-pro", "kimi-k3"])
+    # 全部无效 → 保持全部
+    chosen2 = mod.set_postpaid_selection(["nope-1", "nope-2"])
+    check("自选: 所选全无效时保持全部", len(chosen2) == 4 and mod._POSTPAID_SELECTED is None)
+
+    # 交互选择:编号挑选
+    mod._POSTPAID_SELECTED = None
+    answers = iter(["1 3"])
+    mod.ask = lambda p="": next(answers, "")
+    import contextlib, io as _io
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.choose_postpaid_models()
+    check("自选: 交互编号'1 3'生效",
+          mod.get_model_ids("postpaid") == ["glm-5.3-flash", "deepseek-v4-pro"])
+    # 交互:回车=全部
+    mod._POSTPAID_SELECTED = None
+    answers = iter([""])
+    mod.ask = lambda p="": next(answers, "")
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.choose_postpaid_models()
+    check("自选: 回车=全部", len(mod.get_model_ids("postpaid")) == 4)
+    # 交互:模型名直接输入
+    mod._POSTPAID_SELECTED = None
+    answers = iter(["kimi-k3"])
+    mod.ask = lambda p="": next(answers, "")
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.choose_postpaid_models()
+    check("自选: 直接输入模型名生效",
+          mod.get_model_ids("postpaid") == ["kimi-k3"])
+
+    # Claude 槽位:精确匹配优先(flash 在前也不抢 glm-5.3)
+    mod._POSTPAID_SELECTED = None
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.configure_claude_code(base, "sk-pp-9", plan)
+    env9 = json.loads((tmp / ".claude" / "settings.json").read_text())["env"]
+    check("自选: Claude opus 精确匹配 glm-5.3",
+          env9.get("ANTHROPIC_DEFAULT_OPUS_MODEL") == "glm-5.3")
+
     # Claude 动态槽
     mod._POSTPAID_DISCOVERED = ["glm-5.3", "glm-5.3-flash", "hy4-preview"]
     import contextlib, io as _io

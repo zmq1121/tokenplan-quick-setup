@@ -6,6 +6,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -1311,11 +1312,11 @@ _POSTPAID_PREFERRED = ("glm-5.3", "glm-5.3-flash", "deepseek-v4-pro", "hy4-previ
 
 # 后付费非聊天能力排除(视频/图像/语音/embedding/音乐/翻译/3D 等;
 # 命中的模型不写入聊天类工具,避免淹没模型下拉框)
-_POSTPAID_EXCLUDE = __import__("re").compile(
+_POSTPAID_EXCLUDE = re.compile(
     r"video|image|embed|tts|speech|asr|whisper|rerank|dubbing|3d|mt2|-mt-|actor|"
     r"-as-fast|voice|speak|listen|txt2img|caption|ocr|seedream|pixverse|vidu|"
     r"kling|tripo|wand|youtu-vita|hi3d|hy-mt|music|world2|tokenhub-",
-    __import__("re").I,
+    re.I,
 )
 
 
@@ -1351,13 +1352,74 @@ def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]
     return None
 
 
+# 后付费:用户自选的模型子集(None = 全部聊天模型)
+_POSTPAID_SELECTED: Optional[List[str]] = None
+
+
+def postpaid_chat_models() -> List[str]:
+    """Discovered postpaid models filtered to chat capability (raw fallback)."""
+    assert _POSTPAID_DISCOVERED is not None
+    chat = [m for m in _POSTPAID_DISCOVERED if not _POSTPAID_EXCLUDE.search(m)]
+    return chat or list(_POSTPAID_DISCOVERED)
+
+
+def set_postpaid_selection(models: List[str]) -> List[str]:
+    """Restrict the postpaid catalog to a user-chosen subset (validated)."""
+    global _POSTPAID_SELECTED
+    chat = postpaid_chat_models()
+    chosen = [m for m in chat if m in models]  # 保持发现顺序
+    if not chosen:
+        warn("所选模型均不在发现列表中,保持全部")
+        return chat
+    dropped = [m for m in models if m not in chat]
+    if dropped:
+        warn(f"忽略未知模型: {', '.join(dropped)}")
+    _POSTPAID_SELECTED = chosen
+    return chosen
+
+
+def choose_postpaid_models() -> None:
+    """Interactive model selection for postpaid; Enter/EOF = all chat models."""
+    chat = postpaid_chat_models()
+    print()
+    print("  ── 选择要配置的模型 ──")
+    print()
+    print("  直接回车 = 全部聊天模型;输入编号(空格/逗号分隔)只配置所选")
+    print()
+    for i, m in enumerate(chat, 1):
+        print(f"     [{i:2d}] {m}")
+    print()
+    try:
+        raw = ask("编号(回车=全部): ")
+    except EOFError:
+        return
+    tokens = [t for t in re.split(r"[\s,，]+", raw) if t]
+    if not tokens or raw in {"all", "*", "全部"}:
+        return
+    picked: List[str] = []
+    for tok in tokens:
+        if tok.isdigit():
+            idx = int(tok)
+            if 1 <= idx <= len(chat):
+                picked.append(chat[idx - 1])
+                continue
+        hit = next((m for m in chat if tok == m), None)
+        if hit:
+            picked.append(hit)
+    if picked:
+        global _POSTPAID_SELECTED
+        _POSTPAID_SELECTED = picked
+        ok(f"已选择 {len(picked)} 个模型")
+
+
 def _postpaid_catalog() -> Optional[Dict[str, object]]:
     """Build a catalog view from the discovered postpaid models (chat-capable only)."""
     if not _POSTPAID_DISCOVERED:
         return None
-    ids = [m for m in _POSTPAID_DISCOVERED if not _POSTPAID_EXCLUDE.search(m)]
-    if not ids:
-        ids = list(_POSTPAID_DISCOVERED)  # 全被过滤时兜底用原始列表
+    if _POSTPAID_SELECTED:
+        ids = list(_POSTPAID_SELECTED)
+    else:
+        ids = postpaid_chat_models()
     preferred = next((m for m in _POSTPAID_PREFERRED if m in ids), ids[0])
     return {
         "default": preferred,
@@ -1506,7 +1568,9 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
         # 后付费无固定槽位映射:从发现列表按能力倾向挑选
         def _pick(*keywords: str) -> str:
             for kw in keywords:
-                hit = next((m for m in model_ids if kw in m), "")
+                hit = next((m for m in model_ids if m == kw), "")
+                if not hit:
+                    hit = next((m for m in model_ids if kw in m), "")
                 if hit:
                     return hit
             return model_ids[0]
@@ -2138,6 +2202,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="要处理的工具，支持编号或 key，逗号/空格分隔；不传则交互选择",
     )
     parser.add_argument(
+        "--models",
+        help="只配置指定模型(逗号分隔;后付费套餐按发现列表校验,其余套餐暂不支持)",
+        default=None,
+        dest="models",
+    )
+    parser.add_argument(
         "--yes",
         action="store_true",
         help="尽量跳过确认提示（适合自动化）",
@@ -2545,8 +2615,15 @@ def main() -> None:
             if not ids:
                 warn("后付费模式需要联网获取模型列表,无法继续")
                 return
-        chat = [m for m in _POSTPAID_DISCOVERED if not _POSTPAID_EXCLUDE.search(m)]
+        chat = postpaid_chat_models()
         ok(f"后付费模型列表已获取（{len(_POSTPAID_DISCOVERED)} 个,其中聊天模型 {len(chat)} 个）")
+        if args.models:
+            chosen = set_postpaid_selection(
+                [t for t in re.split(r"[\s,，]+", args.models) if t]
+            )
+            ok(f"按 --models 配置 {len(chosen)} 个模型")
+        elif not args.yes:
+            choose_postpaid_models()
     else:
         remote_models = fetch_remote_models(base_url, api_key)
         if remote_models:
@@ -2557,6 +2634,9 @@ def main() -> None:
             else:
                 ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
     print()
+
+    if args.models and plan.key != "postpaid":
+        warn("--models 目前仅支持后付费套餐,已忽略")
 
     repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())
 

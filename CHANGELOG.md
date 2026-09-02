@@ -2,6 +2,25 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-09-02
+
+### 新增
+
+- **后付费模型自选**:发现模型后弹出编号列表(32 个聊天模型),
+  直接回车 = 全部,输入编号/模型名(空格或逗号分隔)= 只配置所选;
+  命令行可用 `--models glm-5.3,kimi-k3` 指定(自动化场景配 --yes)
+- Claude Code 槽位挑选改为精确匹配优先(修复 glm-5.3 被
+  glm-5.3-flash 子串抢位)
+
+### 说明
+
+- 后付费(选项 8)支持**全部 17 个工具**,非仅 WorkBuddy:发现列表
+  填入共享模型目录后,所有配置器(Claude Code/Codex/WorkBuddy/…)
+  均已验证可用;/v1/messages(Anthropic)与 /v1/responses(Codex)
+  端点均实测 200
+
+[1.4.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.4.0
+
 ## [1.3.2] - 2026-09-02
 
 ### 修复

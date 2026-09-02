@@ -106,6 +106,18 @@ Windows:从 https://www.python.org/downloads 安装(勾选 Add to PATH)。
 **Q: 后付费(选项 8)与套餐的区别**
 套餐(Token Plan)是包月订阅,模型固定;后付费按实际用量计费(按 token 计费,API Key 在 TokenHub 控制台创建),模型列表动态变化,安装器联网自动获取。参考:[TokenHub 首次调用指南](https://cloud.tencent.com/document/product/1823/130058)。
 
+选择后付费后,安装器会列出发现的全部聊天模型(编号列表),此时:
+- 直接回车 = 配置全部
+- 输入编号(如 `4 8 13`,空格或逗号分隔)= 只配置所选模型
+
+也可以在命令行直接指定(适合自动化):
+
+```bash
+bash setup.command --plan postpaid --api-key <KEY> --models glm-5.3,kimi-k3 --yes
+```
+
+后付费支持全部 17 个工具,与套餐一致。
+
 **Q: 安装中断或网络超时**
 重新运行即可。已完成的步骤会跳过,不会重复安装。
 

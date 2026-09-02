@@ -1,0 +1,12 @@
+# 行尾规范化:哈希一致性测试要求 setup.command 在所有平台检出为相同字节
+# setup.command 是 bash/Python 多态脚本,必须 LF
+setup.command text eol=lf
+npm/lib/setup.command text eol=lf
+
+# Windows 批处理必须 CRLF
+setup.bat text eol=crlf
+
+# Python / 文档跟随平台默认
+*.py text=auto
+*.md text=auto
+*.json text=auto

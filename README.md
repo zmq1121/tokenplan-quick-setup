@@ -64,14 +64,27 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 4 | OpenCode | 自动安装 + 自动配置 |
 | 5 | OpenClaw | 自动安装 + 自动配置 |
 | 6 | DeepSeek Harness | 自动安装 + 自动配置 |
-| 7 | Codex CLI | 自动安装 + 自动配置(config.toml,Responses 协议) |
+| 7 | Codex CLI | 自动安装 + 自动配置(wire_api 按产品线自动选择,见下方说明) |
 | 8 | WorkBuddy | 应用手动下载,套餐模型全量自动写入 `~/.workbuddy/models.json` |
 | 9 | Kimi Code | 自动安装 + 自动配置(config.toml,chat completions) |
 | 10 | Grok CLI | 自动安装 + 自动配置(config.toml,[model.*] 段) |
 | 11 | Pi | 自动安装 + 自动配置(models.json,openai-completions) |
 | 12 | ZCode | 应用手动下载,provider 写入 `~/.zcode/v2/config.json`(闭源客户端,配置层验证) |
 
-编号 1-6 为已验证工具,顺序固定。Kimi Code / Grok CLI / Pi 已端到端验证(配置由安装器写入后,工具实际请求 Token Plan 端点);ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。未列出的工具(如 Cursor、TRAE、Kilo、Cline 等)不提供自动配置,也不在本工具的支持范围内。
+编号 1-6 为已验证工具,顺序固定。未列出的工具(如 Cursor、TRAE、Kilo、Cline 等)不提供自动配置,也不在本工具的支持范围内。
+
+### 真 Key 验证口径(v2.2.0,2026-09 实测)
+
+| 产品线 | 协议端点 | 工具端到端(真实对话) |
+|--------|:---:|:---:|
+| 个人通用/混元(lkeap) | chat ✓ / anthropic ✓(responses 无此端点) | Kimi Code ✓ |
+| 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
+| 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
+| 国际版(tokenhub-intl) | 域名路由正常 | 暂未验证(尚无有效 Key) |
+
+ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。
+
+**Codex 在个人版的已知限制**:个人版(lkeap)不提供 Responses 端点,官方文档要求 `wire_api = "chat"`,但 Codex 0.152+ 已移除 chat 模式(上游 [openai/codex#7782](https://github.com/openai/codex/discussions/7782))。安装器对个人版按官方文档写入 `chat` 并在配置时警告;企业/国际/后付费产品线写入 `responses`(真 Key 实测通过)。个人版用户如遇 Codex 报错,需降级 Codex 版本——这是官方文档与新版 Codex 之间的上游冲突,非安装器问题。
 
 Windows 平台差异:Hermes Agent 无官方安装器,安装器会提示手动安装后重跑 `repair`;CodeBuddy 的 API Key 通过 `setx` 写入用户环境变量,需重新打开终端生效;`claude-tokenplan` 选择器以 `.cmd` 文件写入 npm 全局目录。
 

@@ -83,6 +83,16 @@ def test_registry():
     check("plugin 工具都有扩展 ID",
           all(t.key in mod.PLUGIN_EXTENSION_IDS for t in mod.TOOLS if t.backend == "plugin"))
     check("backend 全部已注册", all(t.backend in mod.BACKEND_REGISTRY for t in mod.TOOLS))
+    check("7 个套餐(4 中国站 + 3 国际站)", len(mod.PLAN_CATALOG) == 7)
+    check("国际站套餐走 intl 端点",
+          all(p.base_url.startswith("https://tokenhub-intl.")
+              for p in mod.PLAN_CATALOG.values() if p.key.startswith("intl-")))
+    check("每个套餐都有模型目录",
+          set(p.key for p in mod.PLAN_CATALOG.values()) <= set(mod.MODEL_CATALOG))
+    check("配置签名与配置器一一对应",
+          set(mod.CONFIG_SIGNATURES) == set(mod.CONFIGURATOR_REGISTRY))
+    check("每个签名文件路径存在且特征串非空",
+          all(rel and marker for rel, marker in mod.CONFIG_SIGNATURES.values()))
 
 
 def test_registry_windows():
@@ -219,6 +229,79 @@ def test_permissions():
     else:
         check("write_json: 0o600", p.stat().st_mode & 0o777 == 0o600)
         check("write_env: 0o600", e.stat().st_mode & 0o777 == 0o600)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: doctor 配置三态 / 超时 / 版本感知
+
+def test_doctor_config_probe():
+    mod = load_module()
+    tmp = sandbox(mod)
+    tool = mod.TOOL_BY_KEY["codex"]
+    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["cursor"]) is None)
+
+    # 未配置:文件不存在 → False
+    check("probe: 配置文件缺失 → False", mod.probe_config(tool) is False)
+
+    # 已配置:写入含签名的文件 → True
+    cfg = tmp / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('model = "glm-5.2"\n\n[model_providers.tokenplan]\nname = "Token Plan"\n')
+    check("probe: 签名存在 → True", mod.probe_config(tool) is True)
+
+    # 配置被外部覆盖(签名丢失)→ False
+    cfg.write_text('model = "gpt-5"\n')
+    check("probe: 签名被覆盖 → False", mod.probe_config(tool) is False)
+
+    # doctor 三态文案
+    import contextlib, io as _io
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.run_doctor([tool])
+    out = buf.getvalue()
+    check("doctor: 配置缺失提示 repair", "配置缺失" in out and "repair" in out)
+    cfg.write_text('[model_providers.tokenplan]\n')
+    buf2 = _io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        mod.run_doctor([tool])
+    check("doctor: 配置有效文案", "配置有效" in buf2.getvalue())
+
+
+def test_install_timeout():
+    mod = load_module()
+    check("INSTALL_TIMEOUT 为 600 秒", mod.INSTALL_TIMEOUT == 600)
+    # 超时路径:假命令 sleep 超过被临时调小的 deadline
+    mod.INSTALL_TIMEOUT = 1
+    import contextlib, io as _io, time as _t
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        t0 = _t.monotonic()
+        passed = mod.run_command(("python3", "-c", "import time; time.sleep(30)"), "超时测试")
+        elapsed = _t.monotonic() - t0
+    check("超时: 返回失败", passed is False)
+    check("超时: 快速返回而非等待 30s", elapsed < 10)
+    check("超时: 提示网络受限", "网络" in buf.getvalue())
+
+
+def test_version_awareness():
+    mod = load_module()
+    check("版本比较: 1.1.0 > 1.0.0",
+          mod._version_tuple("1.1.0") > mod._version_tuple("1.0.0"))
+    check("版本比较: 1.0.10 > 1.0.9",
+          mod._version_tuple("1.0.10") > mod._version_tuple("1.0.9"))
+    check("版本比较: 相等", mod._version_tuple("1.1.0") == mod._version_tuple("1.1.0"))
+    # 提示逻辑:同版本不提示,旧版本提示
+    mod._REMOTE_LATEST_VERSION = mod.VERSION
+    import contextlib, io as _io
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.notify_upgrade_available()
+    check("版本提示: 当前即最新则不提示", "新版本" not in buf.getvalue())
+    mod._REMOTE_LATEST_VERSION = "99.0.0"
+    buf2 = _io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        mod.notify_upgrade_available()
+    check("版本提示: 落后时提示升级", "99.0.0" in buf2.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +474,9 @@ TEST_GROUPS = [
     ("codex", test_codex_config),
     ("uninstall", test_uninstall),
     ("permissions", test_permissions),
+    ("doctor-probe", test_doctor_config_probe),
+    ("timeout", test_install_timeout),
+    ("version", test_version_awareness),
     ("ux", test_ux_helpers),
     ("interactions", test_main_interactions),
     ("catalog", test_remote_catalog),

@@ -62,6 +62,10 @@ py -3 setup.command doctor
 - ✅ 完成后汇总报告
 - ✅ Windows 支持：npm 类工具自动安装、CodeBuddy 环境变量写入（setx）、claude-tokenplan.cmd 模型选择器
 - ✅ 桌面应用分步接入引导（Base URL + API Key 逐步说明）
+- ✅ 国际站（新加坡）套餐支持：个人版 / 企业版专业 / 企业版轻享，与中国站按产品线严格区分
+- ✅ `doctor` 配置三态诊断：已安装+配置有效 / 已安装+配置缺失（提示 repair）/ 未安装
+- ✅ 安装命令 10 分钟超时保护（网络受限时明确报错而非无限转圈）
+- ✅ 旧安装文件自动感知新版本（通过远程目录提示升级）
 
 ## 支持的工具（17 个）
 
@@ -159,6 +163,20 @@ dsh web
 
 OpenClaw 和 OpenCode 都需要 Node.js/npm；OpenClaw 的安装脚本还需要 curl。首次启动时如果工具提示需要初始化，请按工具提示完成一次初始化即可。
 
+## 套餐与站点
+
+| 选项 | 套餐 | 站点/地域 | Base URL |
+|------|------|----------|----------|
+| 1 | 个人版 - 通用 | 中国站 | `https://api.lkeap.cloud.tencent.com/plan/v3` |
+| 2 | 个人版 - Hy（混元） | 中国站 | 同上 |
+| 3 | 企业版 - 专业套餐 | 中国站 | `https://tokenhub.tencentmaas.com/plan/v3` |
+| 4 | 企业版 - 轻享套餐 | 中国站 | 同上 |
+| 5 | 个人版 | 国际站（新加坡） | `https://tokenhub-intl.tencentmaas.com/plan/v3` |
+| 6 | 企业版 - 专业套餐 | 国际站（新加坡） | 同上 |
+| 7 | 企业版 - 轻享套餐 | 国际站（新加坡） | 同上 |
+
+> 国际站仅新加坡地域，不支持跨地域调用。国际站企业版模型表与中国站一致（官方文档"新加坡"章节核实）；国际站个人版模型列表参照中国站通用套餐，建议首次配置后用 `--verify-models default` 端到端验证。API Key 统一在 [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) 管理。
+
 ## CLI 使用说明
 
 本安装器现在是一个终端 CLI 入口，默认命令为：
@@ -178,7 +196,7 @@ chmod +x tokenplan-setup
 
 - `setup`：安装并补全配置，默认模式；
 - `repair`：仅修复已安装工具的配置；
-- `doctor`：只检查环境和安装状态，不修改任何文件；
+- `doctor`：只检查环境和安装状态（含 Token Plan 配置块是否完好），不修改任何文件；
 - `uninstall`：从备份还原配置，并清理安装器写入的文件/环境变量/PATH 修改。
 
 例如：
@@ -196,12 +214,14 @@ bash setup.command --version
 1. **远程目录（优先）**：仓库根目录的 [models.json](models.json)，安装器启动时通过 jsDelivr CDN 拉取。**新模型上线只需修改这个 JSON 并提交**，所有已分发出去的安装器（包括旧的微信文件）下次运行时自动拿到新列表，无需重新发文件；
 2. **内置目录（回退）**：`setup.command` 内的 `MODEL_CATALOG`，远程不可用（离线/CDN 被墙）时使用。
 
-个人版套餐还会额外调用 API `/models` 端点做交叉核对；企业版端点不提供该 API，以策展目录为准。
+个人版套餐还会额外调用 API `/models` 端点做交叉核对；企业版端点不提供该 API，以策展目录为准。国际站企业套餐模型与中国站一致；国际站个人版参照中国站通用套餐（官方国际站文档暂无法程序化抓取，可通过远程目录随时修正）。
+
+远程目录同时携带 `latest_version` 字段：旧版本安装文件运行时会自动提示"发现新版本"，微信分发的旧文件由此获得升级通知渠道。
 
 ## 开发与测试
 
 ```bash
-python3 tests/run_tests.py          # 全部回归测试（71 项，零依赖）
+python3 tests/run_tests.py          # 全部回归测试（91 项，零依赖）
 python3 tests/run_tests.py codex    # 只跑某一组
 python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 构建产物
 ```

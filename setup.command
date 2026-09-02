@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -29,6 +29,8 @@ WHITE = "\033[37m"
 
 BACKUP_DIR = HOME / ".tokenplan-backups"
 DEFAULT_TIMEOUT = 10
+# 安装命令(npm 等)的最长等待;超时视为网络受限而非无限转圈
+INSTALL_TIMEOUT = 600
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -298,11 +300,33 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 bufsize=1,
             )
         assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip()
-            if line:
-                print(f"     {WHITE}{line}{RESET}")
-        proc.wait()
+        # 看门狗:到点 kill 进程,让阻塞中的 readline 以 EOF 退出。
+        # (按行检查对无输出的静默进程无效——readline 永远等不到第一行。)
+        state = {"timed_out": False}
+
+        def _kill_on_timeout() -> None:
+            state["timed_out"] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+        watchdog = threading.Timer(INSTALL_TIMEOUT, _kill_on_timeout)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    print(f"     {WHITE}{line}{RESET}")
+            proc.wait()
+        finally:
+            watchdog.cancel()
+        if state["timed_out"]:
+            print()
+            warn(f"{message} — 超时(超过 {INSTALL_TIMEOUT // 60} 分钟,已终止)")
+            warn("网络可能受限;可用 --tools 跳过该工具,或先手动安装后重跑")
+            return False
         print()
         if proc.returncode == 0:
             ok(f"{message} — 完成")
@@ -363,6 +387,52 @@ MODEL_CATALOG = {
             "Auto 智能路由: auto",
         ),
     },
+    # ── 国际站(新加坡地域):端点与模型来自官方文档 130659/131173 的"新加坡"章节 ──
+    # 专业套餐模型表与中国站逐行一致(2026-09 官方文档核实);轻享仅 Auto。
+    # 个人版模型列表参照中国站通用套餐(官方国际站文档 1300/81470 暂无法程序化访问,
+    # 以 --verify-models 端到端验证兜底;远程目录 models.json 可随时修正)。
+    "intl-personal": {
+        "default": "tc-code-latest",
+        "display": (
+            "Auto 智能路由: tc-code-latest",
+            "DeepSeek-V4-Flash: deepseek-v4-flash-202605",
+            "DeepSeek-V4-Pro: deepseek-v4-pro-202606",
+            "MiniMax-M2.7: minimax-m2.7",
+            "GLM-5: glm-5",
+            "GLM-5.1: glm-5.1",
+            "GLM-5.2: glm-5.2",
+            "Kimi-K2.5: kimi-k2.5 (已过 2026-08-31 下线日期,可能不可用)",
+        ),
+    },
+    "intl-enterprise-pro": {
+        "default": "auto",
+        "display": (
+            "Auto: auto",
+            "GLM-5.3: glm-5.3",
+            "GLM-5.2: glm-5.2",
+            "GLM-5: glm-5",
+            "GLM-5.1: glm-5.1",
+            "GLM-5-Turbo: glm-5-turbo",
+            "Kimi K2.7 Code: kimi-k2.7-code",
+            "HighSpeed: kimi-k2.7-code-highspeed",
+            "Kimi-K2.6: kimi-k2.6",
+            "MiniMax-M2.7: minimax-m2.7",
+            "MiniMax-M3: minimax-m3",
+            "DeepSeek-V4-Flash: deepseek-v4-flash",
+            "DeepSeek-V4-Pro: deepseek-v4-pro",
+            "DeepSeek-V4-Flash 0731 正式版: deepseek-v4-flash-0731",
+            "DeepSeek-V4-Pro 0813 正式版: deepseek-v4-pro-0813",
+            "DeepSeek-V4-Flash 正式版 原厂: deepseek-v4-flash-202605",
+            "Pro 原厂: deepseek-v4-pro-202606",
+            "Vision-Exp 原厂(多模态): deepseek/deepseek-v4-flash-vision-exp",
+        ),
+    },
+    "intl-enterprise-light": {
+        "default": "auto",
+        "display": (
+            "Auto 智能路由: auto",
+        ),
+    },
 }
 
 # Claude Code exposes three fixed custom slots. Keep these mappings separate from
@@ -374,6 +444,16 @@ CLAUDE_MODEL_SLOTS = {
         "haiku": "deepseek-v4-flash-202605",
     },
     "enterprise-pro": {
+        "opus": "deepseek-v4-pro-202606",
+        "sonnet": "glm-5.2",
+        "haiku": "deepseek-v4-flash-202605",
+    },
+    "intl-personal": {
+        "opus": "deepseek-v4-pro-202606",
+        "sonnet": "glm-5.2",
+        "haiku": "deepseek-v4-flash-202605",
+    },
+    "intl-enterprise-pro": {
         "opus": "deepseek-v4-pro-202606",
         "sonnet": "glm-5.2",
         "haiku": "deepseek-v4-flash-202605",
@@ -411,6 +491,30 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         base_url="https://tokenhub.tencentmaas.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key",
         only_note="该套餐仅支持 Auto 模型",
+    ),
+    "5": PlanSpec(
+        choice="5",
+        key="intl-personal",
+        display_name="国际站 - 个人版（新加坡）",
+        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        key_url="https://console.cloud.tencent.com/tokenhub/apikey",
+        only_note="新加坡地域,不支持跨地域调用;模型列表参照中国站个人版通用套餐",
+    ),
+    "6": PlanSpec(
+        choice="6",
+        key="intl-enterprise-pro",
+        display_name="国际站 - 企业版专业套餐（新加坡）",
+        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        key_url="https://console.cloud.tencent.com/tokenhub/apikey",
+        only_note="新加坡地域,不支持跨地域调用",
+    ),
+    "7": PlanSpec(
+        choice="7",
+        key="intl-enterprise-light",
+        display_name="国际站 - 企业版轻享套餐（新加坡）",
+        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        key_url="https://console.cloud.tencent.com/tokenhub/apikey",
+        only_note="新加坡地域;该套餐仅支持 Auto 模型",
     ),
 }
 
@@ -1116,11 +1220,12 @@ REMOTE_CATALOG_URL = (
     "https://cdn.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@main/models.json"
 )
 _REMOTE_CATALOG: Optional[Dict[str, Dict[str, object]]] = None
+_REMOTE_LATEST_VERSION: Optional[str] = None
 
 
 def refresh_remote_catalog() -> None:
     """Fetch the remote model catalog; keep built-in catalog on any failure."""
-    global _REMOTE_CATALOG
+    global _REMOTE_CATALOG, _REMOTE_LATEST_VERSION
     try:
         req = urllib.request.Request(
             REMOTE_CATALOG_URL, headers={"User-Agent": f"tokenplan-setup/{VERSION}"}
@@ -1130,8 +1235,32 @@ def refresh_remote_catalog() -> None:
         plans = payload.get("plans") if isinstance(payload, dict) else None
         if isinstance(plans, dict) and plans:
             _REMOTE_CATALOG = plans
+        latest = payload.get("latest_version") if isinstance(payload, dict) else None
+        if isinstance(latest, str) and latest:
+            _REMOTE_LATEST_VERSION = latest
     except Exception:
         pass
+
+
+def _version_tuple(version: str) -> Tuple[int, ...]:
+    """Parse '1.2.3' into (1, 2, 3); non-numeric parts are ignored."""
+    parts = []
+    for chunk in version.split("."):
+        if chunk.isdigit():
+            parts.append(int(chunk))
+        else:
+            break
+    return tuple(parts) or (0,)
+
+
+def notify_upgrade_available() -> None:
+    """Old distributed files learn about new releases via the remote catalog."""
+    if not _REMOTE_LATEST_VERSION:
+        return
+    if _version_tuple(VERSION) >= _version_tuple(_REMOTE_LATEST_VERSION):
+        return
+    dim(f"发现新版本: 当前 v{VERSION},最新 v{_REMOTE_LATEST_VERSION}")
+    dim("建议重新获取安装文件,或使用: npx tokenplan-setup@latest")
 
 
 def get_model_catalog(plan_key: str) -> Dict[str, object]:
@@ -1613,6 +1742,37 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "codex": configure_codex,
 }
 
+# doctor 用来判断"我们的配置块是否还在"的签名:工具 key -> (HOME 相对路径, 特征串)。
+# 必须与对应 configurator 实际写入的内容保持同步(有测试守着)。
+CONFIG_SIGNATURES: Dict[str, Tuple[str, str]] = {
+    "codebuddy": (".codebuddy/settings.json", "CODEBUDDY_API_KEY"),
+    "claude-code": (".claude/settings.json", "tokenplan"),
+    "hermes": (".hermes/config.yaml", "token-plan"),
+    "openclaw": (".openclaw/openclaw.json", "tokenplan"),
+    "opencode": (".config/opencode/opencode.json", "tokenplan"),
+    "dsh": (".dsh/settings.yaml", "tokenplan"),
+    "codex": (".codex/config.toml", "[model_providers.tokenplan]"),
+}
+
+
+def probe_config(tool: ToolSpec) -> Optional[bool]:
+    """Check whether this installer's config block still exists.
+
+    Returns None when the tool has no auto-config (guided only); True/False
+    when the signature file exists and contains/misses our marker.
+    """
+    signature = CONFIG_SIGNATURES.get(tool.key)
+    if not signature:
+        return None
+    rel_path, marker = signature
+    path = HOME / rel_path
+    if not path.exists():
+        return False
+    try:
+        return marker in path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+
 
 def configure_tool(tool: ToolSpec, base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Dispatch to the tool's configurator if one is registered."""
@@ -1839,9 +1999,19 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
     print()
     for tool in selected_tools:
         installed = is_tool_installed(tool)
-        status = "已安装" if installed else "未安装"
+        configured = probe_config(tool)
+        if installed and configured is True:
+            status = "已安装,Token Plan 配置有效"
+        elif installed and configured is False:
+            status = "已安装,Token Plan 配置缺失"
+        elif installed:
+            status = "已安装"
+        else:
+            status = "未安装"
         print(f"  {tool.name}: {status}")
         print(f"    配置位置: {tool.cfg_hint}")
+        if installed and configured is False:
+            print("    建议: 运行 repair 子命令恢复配置(不会重装程序)")
         if not installed and should_manual_download(tool):
             if tool.backend in {"desktop", "deploy"}:
                 print("    接入方式: 手动获取应用，运行 setup 查看分步引导")
@@ -2159,6 +2329,7 @@ def main() -> None:
         info(f"模型目录已更新（远程 {sum(len(p.get('display', ())) for p in _REMOTE_CATALOG.values())} 条）")
     else:
         info("使用内置模型目录（远程目录不可用或未配置）")
+    notify_upgrade_available()
     print()
 
     remote_models = fetch_remote_models(base_url, api_key)

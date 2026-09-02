@@ -1,6 +1,5 @@
 {
-  "_comment": "远程模型目录:setup 启动时优先拉取本文件(jsDelivr CDN),失败回退安装器内置目录。display 行格式与安装器内置一致;default 为套餐默认模型 ID。",
-  "version": 1,
+  "latest_version": "1.1.0",
   "plans": {
     "personal-general": {
       "default": "tc-code-latest",
@@ -45,6 +44,48 @@
       ]
     },
     "enterprise-light": {
+      "default": "auto",
+      "display": [
+        "Auto: auto"
+      ]
+    },
+    "intl-personal": {
+      "default": "tc-code-latest",
+      "display": [
+        "Auto 智能路由: tc-code-latest",
+        "DeepSeek-V4-Flash: deepseek-v4-flash-202605",
+        "DeepSeek-V4-Pro: deepseek-v4-pro-202606",
+        "MiniMax-M2.7: minimax-m2.7",
+        "GLM-5: glm-5",
+        "GLM-5.1: glm-5.1",
+        "GLM-5.2: glm-5.2",
+        "Kimi-K2.5: kimi-k2.5 (已过 2026-08-31 下线日期,可能不可用)"
+      ]
+    },
+    "intl-enterprise-pro": {
+      "default": "auto",
+      "display": [
+        "Auto: auto",
+        "GLM-5.3: glm-5.3",
+        "GLM-5.2: glm-5.2",
+        "GLM-5: glm-5",
+        "GLM-5.1: glm-5.1",
+        "GLM-5-Turbo: glm-5-turbo",
+        "Kimi K2.7 Code: kimi-k2.7-code",
+        "HighSpeed: kimi-k2.7-code-highspeed",
+        "Kimi-K2.6: kimi-k2.6",
+        "MiniMax-M2.7: minimax-m2.7",
+        "MiniMax-M3: minimax-m3",
+        "DeepSeek-V4-Flash: deepseek-v4-flash",
+        "DeepSeek-V4-Pro: deepseek-v4-pro",
+        "DeepSeek-V4-Flash 0731 正式版: deepseek-v4-flash-0731",
+        "DeepSeek-V4-Pro 0813 正式版: deepseek-v4-pro-0813",
+        "DeepSeek-V4-Flash 正式版 原厂: deepseek-v4-flash-202605",
+        "Pro 原厂: deepseek-v4-pro-202606",
+        "Vision-Exp 原厂(多模态): deepseek/deepseek-v4-flash-vision-exp"
+      ]
+    },
+    "intl-enterprise-light": {
       "default": "auto",
       "display": [
         "Auto: auto"

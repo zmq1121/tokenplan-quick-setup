@@ -752,7 +752,7 @@ def test_main_interactions():
         mod.refresh_remote_catalog = _real_refresh
         check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
         wb_models = json.loads((wb_home / ".workbuddy" / "models.json").read_text())
-        check("WorkBuddy: 模型真实落盘", len(wb_models) == 10)  # personal-general 目录现为 10 模型
+        check("WorkBuddy: 模型真实落盘", len(wb_models) == 13)  # personal-general 目录=13 模型(真 Key 实测)
     finally:
         _sp.run = _real
 

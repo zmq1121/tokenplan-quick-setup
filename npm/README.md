@@ -45,7 +45,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 2 | 个人版 - Hy(混元) | 中国站 | 同选项 1 | [Hy 套餐控制台](https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key) |
 | 3 | 企业版 - 专业套餐 | 中国站 | `https://tokenhub.tencentmaas.com/plan/v3` | [企业版控制台](https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key) |
 | 4 | 企业版 - 轻享套餐 | 中国站 | 同选项 3 | 同选项 3 |
-| 5 | 个人版 | 国际站(新加坡) | `https://tokenhub-intl.tencentmaas.com/plan/v3` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
+| 5 | 个人版 | 国际站(新加坡) | `https://tokenhub-intl.tencentcloudmaas.com/plan/v3` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
 | 6 | 企业版 - 专业套餐 | 国际站(新加坡) | 同选项 5 | 同选项 5 |
 | 7 | 企业版 - 轻享套餐 | 国际站(新加坡) | 同选项 5 | 同选项 5 |
 | 8 | 后付费 - 按量计费 | — | `https://tokenhub.tencentmaas.com/v1` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
@@ -80,11 +80,14 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 个人通用/混元(lkeap) | chat ✓ / anthropic ✓(responses 无此端点) | Kimi Code ✓ |
 | 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
 | 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
-| 国际版(tokenhub-intl) | 域名路由正常 | 暂未验证(尚无有效 Key) |
+| 国际版(tencentcloudmaas) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code ✓ |
 
 ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。
 
-**Codex 在个人版的已知限制**:个人版(lkeap)不提供 Responses 端点,官方文档要求 `wire_api = "chat"`,但 Codex 0.152+ 已移除 chat 模式(上游 [openai/codex#7782](https://github.com/openai/codex/discussions/7782))。安装器对个人版按官方文档写入 `chat` 并在配置时警告;企业/国际/后付费产品线写入 `responses`(真 Key 实测通过)。个人版用户如遇 Codex 报错,需降级 Codex 版本——这是官方文档与新版 Codex 之间的上游冲突,非安装器问题。
+**Codex 的两个已知限制**(均为上游冲突,安装器已自动规避并警告):
+
+1. **个人版(lkeap)**:无 Responses 端点,官方文档要求 `wire_api = "chat"`,但 Codex 0.152+ 已移除 chat 模式([openai/codex#7782](https://github.com/openai/codex/discussions/7782))。安装器按官方文档写 `chat` 并警告;个人版用户如遇报错需降级 Codex 版本。
+2. **国际站**:`auto` 路由模型不支持 Responses 协议(网关 400005;CN 域支持)。Codex 在国际站自动改用首个具体模型(专业版 glm-5.3 / 个人版 deepseek-v4-flash-202605,真 Key 实测通过)。
 
 Windows 平台差异:Hermes Agent 无官方安装器,安装器会提示手动安装后重跑 `repair`;CodeBuddy 的 API Key 通过 `setx` 写入用户环境变量,需重新打开终端生效;`claude-tokenplan` 选择器以 `.cmd` 文件写入 npm 全局目录。
 

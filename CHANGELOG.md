@@ -2,6 +2,46 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.3.0] - 2026-09-02
+
+### 修复:国际站端点域名错误 + 全部套餐模型目录按真 Key 实测重建
+
+**① 国际站域名修正(严重)**
+
+- 正确域名是 `tokenhub-intl.tencentcloudmaas.com`(tencent**cloud**maas),
+  此前误用 `tokenhub-intl.tencentmaas.com` —— 该域名确实存在且有网关
+  响应,但属于另一个系统,任何国际站 Key 打上去都报"Key 不存在"
+- 来源:官方国际站文档 1300/81315、81489、78941;三把真 Key 在正确
+  域名上全部验证通过
+
+**② 模型目录全量重建(枚举实测,非文档镜像)**
+
+用真实 Key 对全部套餐做了模型级枚举探测(每个候选模型发真实请求,
+403002=不在套餐 / 200=支持),目录与实际可用模型逐一对齐:
+
+| 套餐 | 旧目录 | 实测 |
+|------|--------|------|
+| 个人通用 | 10 | **13**(+hy3/hy4-preview/minimax-m2.5) |
+| 企业专业 | 18 | **20**(+kimi-k2.5/minimax-m2.5) |
+| 国际个人 | 8(镜像 CN,5 个不可用) | **6**(auto/deepseek×2/glm-5.2/kimi-k2.6/minimax-m3;默认模型从 tc-code-latest 改为 auto) |
+| 国际企业专业 | 18(镜像 CN,5 个不可用) | **13**(glm-5.x 家族仅 5.2/5.3) |
+| 企业轻享/国际轻享 | auto | auto(不变) |
+
+**③ Codex 国际站默认模型修正**
+
+国际站网关的 `auto` 路由不支持 Responses 协议(400005,真 Key 实测;
+CN 域的 auto 支持),Codex 在国际站自动改用首个具体模型(专业版
+glm-5.3、个人版 deepseek-v4-flash-202605)。
+
+### 国际站端到端验证(全部真 Key)
+
+国际企业专业版:codex / kimi / grok / pi / claude-code 五工具全部
+真实对话通过;三协议(chat/responses/anthropic)端点全通。国际个人版
+6 模型 × responses 逐一验证。至此 8 个产品线中 7 个完成真 Key 实测
+(仅个人混元版无独立 Key,沿用官方文档目录)。
+
+[2.3.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.3.0
+
 ## [2.2.0] - 2026-09-02
 
 ### 修复:全产品线真 Key 实测发现的两处严重配置 bug

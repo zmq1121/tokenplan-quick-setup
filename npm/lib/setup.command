@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -398,6 +398,9 @@ MODEL_CATALOG = {
             "GLM-5.2: glm-5.2",
             "GLM-5.3: glm-5.3",
             "Kimi-K2.7-Code: kimi-k2.7-code",
+            "MiniMax-M2.5: minimax-m2.5",
+            "混元 Hy3: hy3",
+            "混元 Hy4-preview: hy4-preview",
         ),
     },
     "personal-hy": {
@@ -419,6 +422,8 @@ MODEL_CATALOG = {
             "Kimi K2.7 Code: kimi-k2.7-code",
             "HighSpeed: kimi-k2.7-code-highspeed",
             "Kimi-K2.6: kimi-k2.6",
+            "Kimi-K2.5: kimi-k2.5",
+            "MiniMax-M2.5: minimax-m2.5",
             "MiniMax-M2.7: minimax-m2.7",
             "MiniMax-M3: minimax-m3",
             "DeepSeek-V4-Flash: deepseek-v4-flash",
@@ -436,21 +441,21 @@ MODEL_CATALOG = {
             "Auto 智能路由: auto",
         ),
     },
-    # ── 国际站(新加坡地域):端点与模型来自官方文档 130659/131173 的"新加坡"章节 ──
-    # 专业套餐模型表与中国站逐行一致(2026-09 官方文档核实);轻享仅 Auto。
-    # 个人版模型列表参照中国站通用套餐(官方国际站文档 1300/81470 暂无法程序化访问,
-    # 以 --verify-models 端到端验证兜底;远程目录 models.json 可随时修正)。
+    # ── 国际站(新加坡地域) ──
+    # 端点域名 tokenhub-intl.tencentcloudmaas.com(官方文档 1300/81315、81489、78941;
+    # 此前误用 tencentmaas.com,2026-09 真 Key 实测纠正)。
+    # 模型表为真 Key 全量枚举实测(2026-09):个人版 6 个(注意 tc-code-latest/
+    # glm-5/glm-5.1/minimax-m2.7 不可用),专业版 13 个(无 glm-5/glm-5.1/
+    # glm-5-turbo/kimi-k2.6/minimax-m2.7),轻享仅 Auto。
     "intl-personal": {
-        "default": "tc-code-latest",
+        "default": "auto",
         "display": (
-            "Auto 智能路由: tc-code-latest",
+            "Auto 智能路由: auto",
             "DeepSeek-V4-Flash: deepseek-v4-flash-202605",
             "DeepSeek-V4-Pro: deepseek-v4-pro-202606",
-            "MiniMax-M2.7: minimax-m2.7",
-            "GLM-5: glm-5",
-            "GLM-5.1: glm-5.1",
             "GLM-5.2: glm-5.2",
-            "Kimi-K2.5: kimi-k2.5 (已过 2026-08-31 下线日期,可能不可用)",
+            "Kimi-K2.6: kimi-k2.6",
+            "MiniMax-M3: minimax-m3",
         ),
     },
     "intl-enterprise-pro": {
@@ -459,13 +464,8 @@ MODEL_CATALOG = {
             "Auto: auto",
             "GLM-5.3: glm-5.3",
             "GLM-5.2: glm-5.2",
-            "GLM-5: glm-5",
-            "GLM-5.1: glm-5.1",
-            "GLM-5-Turbo: glm-5-turbo",
             "Kimi K2.7 Code: kimi-k2.7-code",
             "HighSpeed: kimi-k2.7-code-highspeed",
-            "Kimi-K2.6: kimi-k2.6",
-            "MiniMax-M2.7: minimax-m2.7",
             "MiniMax-M3: minimax-m3",
             "DeepSeek-V4-Flash: deepseek-v4-flash",
             "DeepSeek-V4-Pro: deepseek-v4-pro",
@@ -551,7 +551,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         choice="5",
         key="intl-personal",
         display_name="国际站 - 个人版（新加坡）",
-        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        base_url="https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="新加坡地域,不支持跨地域调用;模型列表参照中国站个人版通用套餐",
     ),
@@ -559,7 +559,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         choice="6",
         key="intl-enterprise-pro",
         display_name="国际站 - 企业版专业套餐（新加坡）",
-        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        base_url="https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="新加坡地域,不支持跨地域调用",
     ),
@@ -567,7 +567,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         choice="7",
         key="intl-enterprise-light",
         display_name="国际站 - 企业版轻享套餐（新加坡）",
-        base_url="https://tokenhub-intl.tencentmaas.com/plan/v3",
+        base_url="https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="新加坡地域;该套餐仅支持 Auto 模型",
     ),
@@ -1971,9 +1971,17 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
       has no /responses (404). Codex >=0.152 rejects chat at config load;
       personal-plan users need a Codex from before the deprecation
       (openai/codex discussion #7782)
+    - intl gateway (tencentcloudmaas): the "auto" router rejects the
+      Responses protocol (400005, real-key verified) even though every
+      concrete model accepts it — Codex defaults to the first concrete
+      model there. CN tokenhub serves auto over responses fine.
     """
     config_path = cfg_path(".codex", "config.toml")
     default_model = str(get_model_catalog(plan.key)["default"])
+    if "tencentcloudmaas" in base_url and default_model == "auto":
+        concrete = [m for m in get_model_ids(plan.key) if m != "auto"]
+        if concrete:
+            default_model = concrete[0]
     wire_api = "chat" if "lkeap" in base_url else "responses"
     existing_lines = (
         config_path.read_text().splitlines() if config_path.exists() else []

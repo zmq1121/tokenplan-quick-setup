@@ -1,5 +1,5 @@
 {
-  "latest_version": "2.2.0",
+  "latest_version": "2.3.0",
   "plans": {
     "personal-general": {
       "default": "tc-code-latest",
@@ -13,7 +13,10 @@
         "GLM-5.1: glm-5.1",
         "GLM-5.2: glm-5.2",
         "GLM-5.3: glm-5.3",
-        "Kimi-K2.7-Code: kimi-k2.7-code"
+        "Kimi-K2.7-Code: kimi-k2.7-code",
+        "MiniMax-M2.5: minimax-m2.5",
+        "混元 Hy3: hy3",
+        "混元 Hy4-preview: hy4-preview"
       ]
     },
     "personal-hy": {
@@ -35,6 +38,8 @@
         "Kimi K2.7 Code: kimi-k2.7-code",
         "HighSpeed: kimi-k2.7-code-highspeed",
         "Kimi-K2.6: kimi-k2.6",
+        "Kimi-K2.5: kimi-k2.5",
+        "MiniMax-M2.5: minimax-m2.5",
         "MiniMax-M2.7: minimax-m2.7",
         "MiniMax-M3: minimax-m3",
         "DeepSeek-V4-Flash: deepseek-v4-flash",
@@ -49,20 +54,18 @@
     "enterprise-light": {
       "default": "auto",
       "display": [
-        "Auto: auto"
+        "Auto 智能路由: auto"
       ]
     },
     "intl-personal": {
-      "default": "tc-code-latest",
+      "default": "auto",
       "display": [
-        "Auto 智能路由: tc-code-latest",
+        "Auto 智能路由: auto",
         "DeepSeek-V4-Flash: deepseek-v4-flash-202605",
         "DeepSeek-V4-Pro: deepseek-v4-pro-202606",
-        "MiniMax-M2.7: minimax-m2.7",
-        "GLM-5: glm-5",
-        "GLM-5.1: glm-5.1",
         "GLM-5.2: glm-5.2",
-        "Kimi-K2.5: kimi-k2.5 (已过 2026-08-31 下线日期,可能不可用)"
+        "Kimi-K2.6: kimi-k2.6",
+        "MiniMax-M3: minimax-m3"
       ]
     },
     "intl-enterprise-pro": {
@@ -71,13 +74,8 @@
         "Auto: auto",
         "GLM-5.3: glm-5.3",
         "GLM-5.2: glm-5.2",
-        "GLM-5: glm-5",
-        "GLM-5.1: glm-5.1",
-        "GLM-5-Turbo: glm-5-turbo",
         "Kimi K2.7 Code: kimi-k2.7-code",
         "HighSpeed: kimi-k2.7-code-highspeed",
-        "Kimi-K2.6: kimi-k2.6",
-        "MiniMax-M2.7: minimax-m2.7",
         "MiniMax-M3: minimax-m3",
         "DeepSeek-V4-Flash: deepseek-v4-flash",
         "DeepSeek-V4-Pro: deepseek-v4-pro",
@@ -91,7 +89,7 @@
     "intl-enterprise-light": {
       "default": "auto",
       "display": [
-        "Auto: auto"
+        "Auto 智能路由: auto"
       ]
     },
     "postpaid": {

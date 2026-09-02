@@ -1,10 +1,41 @@
 # 腾讯云 Token Plan 一键接入
 
-> 就一个文件，双击就能用。
+> 三种方式任选其一：npm / Release 下载 / 单文件直传。
 
 ---
 
 > 📖 **完全不懂命令行？先看 [小白使用说明](docs/USER-GUIDE.md)**——每一步在哪里、点什么、输什么都有图可循。
+
+## 方式一：npx（推荐，无需下载文件）
+
+装有 Node.js（≥14）的机器直接运行：
+
+```bash
+npx tokenplan-setup
+```
+
+国内网络加速：
+
+```bash
+npx --registry=https://registry.npmmirror.com tokenplan-setup
+```
+
+子命令同样可用：`npx tokenplan-setup doctor` / `repair` / `uninstall`。
+
+## 方式二：从 GitHub Release 下载
+
+到 [Releases 页面](https://github.com/zmq1121/tokenplan-quick-setup/releases/latest) 下载对应系统的文件：
+
+| 系统 | 下载文件 | 用法 |
+|------|---------|------|
+| Mac | `setup.command` | `bash setup.command` |
+| Windows | `setup.bat` | 双击运行 |
+
+## 方式三：单文件直传（微信/QQ/邮件）
+
+从 Release 下载后直接把文件发给对方即可，无需其它依赖。
+
+---
 
 ## Mac 用户
 
@@ -44,12 +75,7 @@ py -3 setup.command doctor
 
 ## 发给用户
 
-| 系统 | 发哪个文件 | 怎么用 |
-|------|-----------|--------|
-| Mac | `setup.command` | `bash setup.command` |
-| Windows | `setup.bat` | 双击运行 |
-
-微信/QQ/邮件直接发一个文件就行。
+单文件方式详见上方「方式三」。最新文件始终在 [Releases 页面](https://github.com/zmq1121/tokenplan-quick-setup/releases/latest)。
 
 ## 功能
 

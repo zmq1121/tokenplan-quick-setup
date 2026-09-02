@@ -30,19 +30,38 @@ API Key(`sk-` 开头)在腾讯云控制台获取,**不同套餐入口不同**:
 
 ## 运行
 
-### Mac
+三种方式任选其一。
 
-1. 获取 `setup.command` 文件(群文件或同事转发),放到任意目录
-2. 打开"终端"(Spotlight 搜索"终端"或"Terminal")
-3. 执行(将文件拖入终端窗口可自动填充路径):
+### 方式 A:npx(无需下载文件,需已装 Node.js)
+
+```bash
+npx tokenplan-setup
+```
+
+国内网络加速:
+
+```bash
+npx --registry=https://registry.npmmirror.com tokenplan-setup
+```
+
+### 方式 B:下载单文件
+
+到 [Releases 页面](https://github.com/zmq1121/tokenplan-quick-setup/releases/latest) 下载:
+
+**Mac** —— 下载 `setup.command` 后:
+
+1. 打开"终端"(Spotlight 搜索"终端"或"Terminal")
+2. 执行(将文件拖入终端窗口可自动填充路径):
 
 ```bash
 bash setup.command
 ```
 
-### Windows
+**Windows** —— 下载 `setup.bat`,双击运行。
 
-双击 `setup.bat`。
+### 方式 C:他人直接发文件
+
+同事/群文件里的 `setup.command`(Mac)或 `setup.bat`(Windows)可直接使用,无需其它依赖。
 
 - 系统询问"是否允许更改"时选择"是"
 - 首次运行会自动下载主程序(约需十几秒至一分钟)

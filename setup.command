@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -670,7 +670,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "或保留文件: printf '%s\\n' '[]' > ~/.dsh/cordis.patch.yml",
         ),
     ),
-    # ── 编程工具(编号 7-12) ───────────────────────────────────
     ToolSpec(
         key="codex",
         name="Codex CLI",
@@ -760,7 +759,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "API Key 与模型 ID 按套餐填写，入口名称以当前版本设置页为准",
         ),
     ),
-    # ── 龙虾工具(编号 13-17) ──────────────────────────────────
     ToolSpec(
         key="workbuddy",
         name="WorkBuddy",
@@ -2042,13 +2040,7 @@ def choose_tools() -> List[ToolSpec]:
     print("  输入编号选择，空格分隔；直接回车 = 全部")
     print("  支持输入 all 或 * 选择全部，输入 none 取消选择")
     print()
-    group_marks = {
-        7: "── 编程工具 ──",
-        13: "── 龙虾工具 ──",
-    }
     for idx, tool in enumerate(TOOLS, start=1):
-        if idx in group_marks:
-            print(f"     {WHITE}{group_marks[idx]}{RESET}")
         adapter = get_backend_adapter(tool)
         tag = {
             "cli": f"{GREEN}自动安装{RESET}",
@@ -2591,16 +2583,25 @@ def main() -> None:
         already_installed = is_tool_installed(tool)
 
         if should_manual_download(tool):
-            skipped.append(tool)
-            warn(f"请先下载 {tool.name}")
+            # 桌面应用无法自动安装,但配置可写的工具(如 WorkBuddy)仍要写配置:
+            # 用户装好应用后打开即用,不需要重跑安装器
+            if tool.key in CONFIGURATOR_REGISTRY:
+                try:
+                    configure_tool(tool, base_url, api_key, plan)
+                    installed.append(tool)
+                    ok("配置已写入(应用本体需自行下载安装)")
+                except Exception as exc:
+                    failed.append((tool, str(exc)))
+                    warn(f"配置失败: {exc}")
+            else:
+                skipped.append(tool)
+                warn(f"请先下载 {tool.name}")
             if tool.download_url:
                 info(f"下载: {tool.download_url}")
-            if tool.backend in {"desktop", "deploy"}:
+            if tool.backend in {"desktop", "deploy"} and tool.key not in CONFIGURATOR_REGISTRY:
                 info("手动接入步骤:")
                 for line in render_usage_lines(tool, base_url, api_key):
                     info(f"  {line}")
-            else:
-                info("下载安装后重新运行即可自动完成其余支持工具的配置")
             print()
             continue
 

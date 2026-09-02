@@ -522,6 +522,23 @@ def test_main_interactions():
                "--tools", "codex"], ["1"])
     check("--tools: 只配指定工具", "正在配置 1 个工具" in out and "Codex 已配置" in out)
 
+    # 手动下载类但有配置器的工具(WorkBuddy):配置必须照写,不能只提示下载
+    import subprocess as _sp
+    _real = _sp.run
+    def _fake(cmd, *a, **k):
+        if cmd and "pgrep" in str(cmd[0]):
+            return type("R", (), {"returncode": 1})()
+        return _real(cmd, *a, **k)
+    _sp.run = _fake
+    try:
+        out = run(["x", "--plan", "personal-general", "--api-key", "sk-fake-key-1234567890",
+                   "--tools", "workbuddy"], ["1"])
+        check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
+        wb_models = json.loads((mod.HOME / ".workbuddy" / "models.json").read_text())
+        check("WorkBuddy: 模型真实落盘", len(wb_models) == 8)
+    finally:
+        _sp.run = _real
+
     # 短 key flag 明确报错
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "abc"])
     check("短key: flag 明确报错", "--api-key 传入的 Key 无效" in out)

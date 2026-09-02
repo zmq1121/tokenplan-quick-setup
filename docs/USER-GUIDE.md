@@ -22,7 +22,7 @@ API Key(`sk-` 开头)在腾讯云控制台获取,**不同套餐入口不同**:
 | 个人版 - Hy(混元) | https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key |
 | 企业版(专业/轻享) | https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key |
 | 国际站(新加坡) | https://console.cloud.tencent.com/tokenhub/apikey |
-| 后付费 - 按量计费 | https://console.cloud.tencent.com/lkeap/apikey |
+| 后付费 - 按量计费 | https://console.cloud.tencent.com/tokenhub/apikey |
 
 也可以先运行安装器:选择套餐后,屏幕会显示该套餐对应的获取地址,前往即可。
 
@@ -104,7 +104,7 @@ Windows:从 https://www.python.org/downloads 安装(勾选 Add to PATH)。
 3. 仍失败时,到对应控制台重新创建 Key
 
 **Q: 后付费(选项 8)与套餐的区别**
-套餐(Token Plan)是包月订阅,模型固定;后付费按实际用量计费,模型列表动态变化。后付费模式需联网获取模型列表,安装器会自动完成。
+套餐(Token Plan)是包月订阅,模型固定;后付费按实际用量计费(按 token 计费,API Key 在 TokenHub 控制台创建),模型列表动态变化,安装器联网自动获取。参考:[TokenHub 首次调用指南](https://cloud.tencent.com/document/product/1823/130058)。
 
 **Q: 安装中断或网络超时**
 重新运行即可。已完成的步骤会跳过,不会重复安装。

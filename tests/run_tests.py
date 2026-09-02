@@ -84,8 +84,8 @@ def test_registry():
           all(t.key in mod.PLUGIN_EXTENSION_IDS for t in mod.TOOLS if t.backend == "plugin"))
     check("backend 全部已注册", all(t.backend in mod.BACKEND_REGISTRY for t in mod.TOOLS))
     check("8 个套餐(4 中国站 + 3 国际站 + 1 后付费)", len(mod.PLAN_CATALOG) == 8)
-    check("后付费套餐走 lkeap 端点",
-          mod.PLAN_CATALOG["8"].base_url == "https://api.lkeap.cloud.tencent.com/v3")
+    check("后付费套餐走 tokenhub /v1 端点",
+          mod.PLAN_CATALOG["8"].base_url == "https://tokenhub.tencentmaas.com/v1")
     check("国际站套餐走 intl 端点",
           all(p.base_url.startswith("https://tokenhub-intl.")
               for p in mod.PLAN_CATALOG.values() if p.key.startswith("intl-")))
@@ -242,38 +242,54 @@ def test_postpaid():
     mod._REMOTE_CATALOG = None
     mod._POSTPAID_DISCOVERED = None
     plan = mod.PLAN_CATALOG["8"]
-    base = "https://api.lkeap.cloud.tencent.com/v3"
+    base = "https://tokenhub.tencentmaas.com/v1"
 
     check("后付费: 选项 8 存在且端点正确",
           plan.key == "postpaid" and plan.base_url == base)
-    check("后付费: Key 控制台指向 lkeap",
-          "lkeap" in plan.key_url)
+    check("后付费: Key 控制台指向 tokenhub",
+          "tokenhub/apikey" in plan.key_url)
 
     # 未发现时:目录为空,default 为空串
     empty_catalog = mod.get_model_catalog("postpaid")
     check("后付费: 未发现时目录为空", empty_catalog["default"] == "" and not empty_catalog["display"])
 
-    # 模拟发现成功
-    mod._POSTPAID_DISCOVERED = ["deepseek-v3.2", "deepseek-r1", "hunyuan-turbos", "deepseek-chat"]
+    # 模拟发现成功(贴近 tokenhub /v1/models 实测列表)
+    mod._POSTPAID_DISCOVERED = ["hy4-preview", "glm-5.3", "glm-5.3-flash", "deepseek-v3"]
     catalog = mod.get_model_catalog("postpaid")
     ids = mod.get_model_ids("postpaid")
     check("后付费: 发现后目录为发现列表", set(ids) == set(mod._POSTPAID_DISCOVERED))
-    check("后付费: 默认模型优先 deepseek-v3.2", catalog["default"] == "deepseek-v3.2")
+    check("后付费: 默认模型优先 glm-5.3", catalog["default"] == "glm-5.3")
 
-    # 模拟无 v3.2 时的次优选择
-    mod._POSTPAID_DISCOVERED = ["hunyuan-turbos", "deepseek-chat"]
-    check("后付费: 无首选时回退第一个", mod.get_model_catalog("postpaid")["default"] == "hunyuan-turbos")
+    # 模拟无首选时的次优选择
+    mod._POSTPAID_DISCOVERED = ["hy3", "deepseek-chat"]
+    check("后付费: 无首选时回退第一个", mod.get_model_catalog("postpaid")["default"] == "hy3")
+
+    # 聊天能力过滤:非聊天模型不进目录
+    mod._POSTPAID_DISCOVERED = [
+        "glm-5.3", "kling-video-v3", "kinfra-text-embedding-4b",
+        "minimax-music-v3.0", "deepseek-v4-pro",
+    ]
+    ids = mod.get_model_ids("postpaid")
+    check("后付费: 非聊天模型被过滤",
+          set(ids) == {"glm-5.3", "deepseek-v4-pro"})
+    check("后付费: 过滤后默认模型仍正确",
+          mod.get_model_catalog("postpaid")["default"] == "glm-5.3")
+
+    # 全部被过滤时兜底原始列表(不至于空配置)
+    mod._POSTPAID_DISCOVERED = ["kling-video-v3", "seedream-image-v5.0-pro"]
+    check("后付费: 全被过滤时兜底原始列表",
+          mod.get_model_ids("postpaid") == ["kling-video-v3", "seedream-image-v5.0-pro"])
 
     # Claude 动态槽
-    mod._POSTPAID_DISCOVERED = ["deepseek-v3.2", "deepseek-chat", "hunyuan-turbo"]
+    mod._POSTPAID_DISCOVERED = ["glm-5.3", "glm-5.3-flash", "hy4-preview"]
     import contextlib, io as _io
     with contextlib.redirect_stdout(_io.StringIO()):
         mod.configure_claude_code(base, "sk-pp-test-1234567890", plan)
     settings = json.loads((tmp / ".claude" / "settings.json").read_text())
     env = settings.get("env", {})
-    check("后付费: Claude anthropic 端点", env.get("ANTHROPIC_BASE_URL") == base + "/anthropic")
-    check("后付费: Claude opus 槽选 v3.2", env.get("ANTHROPIC_DEFAULT_OPUS_MODEL") == "deepseek-v3.2")
-    check("后付费: Claude haiku 槽选 turbo", env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") == "hunyuan-turbo")
+    check("后付费: Claude anthropic 端点(即 /v1,Claude 自动拼 /messages)", env.get("ANTHROPIC_BASE_URL") == base)
+    check("后付费: Claude opus 槽选 glm-5.3", env.get("ANTHROPIC_DEFAULT_OPUS_MODEL") == "glm-5.3")
+    check("后付费: Claude haiku 槽选 flash", env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") == "glm-5.3-flash")
 
     # verify:发现失败返回 False
     def _fail(url, key):

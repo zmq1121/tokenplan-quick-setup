@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -460,7 +460,7 @@ MODEL_CATALOG = {
             "Auto 智能路由: auto",
         ),
     },
-    # 后付费(LKEAP 按量计费):模型库动态变化,不做内置策展;
+    # 后付费(TokenHub 按量计费,官方文档 1823/130058):模型库动态变化,不做内置策展;
     # 运行时通过 /v3/models 实时发现(端点已验证存在),见 discover_postpaid_models()。
     "postpaid": {
         "default": "",
@@ -553,8 +553,8 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         choice="8",
         key="postpaid",
         display_name="后付费 - 按量计费（大模型服务平台）",
-        base_url="https://api.lkeap.cloud.tencent.com/v3",
-        key_url="https://console.cloud.tencent.com/lkeap/apikey",
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="按 token 计费(非套餐订阅);模型列表由 API 实时发现,需联网",
     ),
 }
@@ -1306,8 +1306,17 @@ def notify_upgrade_available() -> None:
 # 后付费:运行时通过 /v3/models 发现的模型列表(verify 阶段填充)
 _POSTPAID_DISCOVERED: Optional[List[str]] = None
 
-# 后付费默认模型的挑选优先级(命中即用,全不中用第一个)
-_POSTPAID_PREFERRED = ("deepseek-v3.2", "deepseek-v3.1", "deepseek-r1", "deepseek-v3")
+# 后付费默认模型的挑选优先级(基于 tokenhub /v1/models 实测列表)
+_POSTPAID_PREFERRED = ("glm-5.3", "glm-5.3-flash", "deepseek-v4-pro", "hy4-preview")
+
+# 后付费非聊天能力排除(视频/图像/语音/embedding/音乐/翻译/3D 等;
+# 命中的模型不写入聊天类工具,避免淹没模型下拉框)
+_POSTPAID_EXCLUDE = __import__("re").compile(
+    r"video|image|embed|tts|speech|asr|whisper|rerank|dubbing|3d|mt2|-mt-|actor|"
+    r"-as-fast|voice|speak|listen|txt2img|caption|ocr|seedream|pixverse|vidu|"
+    r"kling|tripo|wand|youtu-vita|hi3d|hy-mt|music|world2|tokenhub-",
+    __import__("re").I,
+)
 
 
 def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]:
@@ -1343,10 +1352,12 @@ def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]
 
 
 def _postpaid_catalog() -> Optional[Dict[str, object]]:
-    """Build a catalog view from the discovered postpaid models."""
+    """Build a catalog view from the discovered postpaid models (chat-capable only)."""
     if not _POSTPAID_DISCOVERED:
         return None
-    ids = _POSTPAID_DISCOVERED
+    ids = [m for m in _POSTPAID_DISCOVERED if not _POSTPAID_EXCLUDE.search(m)]
+    if not ids:
+        ids = list(_POSTPAID_DISCOVERED)  # 全被过滤时兜底用原始列表
     preferred = next((m for m in _POSTPAID_PREFERRED if m in ids), ids[0])
     return {
         "default": preferred,
@@ -1481,9 +1492,10 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Write ~/.claude/settings.json env block + model slots + tokenplan launcher."""
-    if base_url.rstrip("/").endswith("/v3"):
-        # 后付费:Anthropic 兼容端点(已探活,与 /v3 并列)
-        anthropic_url = base_url.rstrip("/") + "/anthropic"
+    if base_url.rstrip("/").endswith("/v1"):
+        # 后付费(tokenhub /v1):Anthropic 标准端点 /v1/messages 已实测可用,
+        # Claude 的 ANTHROPIC_BASE_URL 填到 /v1 为止(客户端自动拼 /messages)
+        anthropic_url = base_url.rstrip("/")
     else:
         anthropic_url = base_url.replace("/plan/v3", "/plan/anthropic")
     catalog = get_model_catalog(plan.key)
@@ -1499,9 +1511,9 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
                     return hit
             return model_ids[0]
         claude_slots = {
-            "opus": _pick("v3.2", "v3.1", "r1", "pro"),
-            "sonnet": _pick("v3.1", "v3", "chat"),
-            "haiku": _pick("turbo", "flash", "lite"),
+            "opus": _pick("glm-5.3", "pro", "r1"),
+            "sonnet": _pick("glm-5.3", "chat", "v3"),
+            "haiku": _pick("flash", "lite", "turbo"),
         }
     env = {
         "ANTHROPIC_AUTH_TOKEN": api_key,
@@ -2527,15 +2539,14 @@ def main() -> None:
 
     if plan.key == "postpaid":
         # 后付费:目录即发现结果,无交叉检查
-        if _POSTPAID_DISCOVERED:
-            ok(f"后付费模型列表已获取（{len(_POSTPAID_DISCOVERED)} 个）")
-        else:
+        if not _POSTPAID_DISCOVERED:
             # verify 失败后用户仍选择继续:再试一次发现,失败则中止
             ids = discover_postpaid_models(base_url, api_key)
             if not ids:
                 warn("后付费模式需要联网获取模型列表,无法继续")
                 return
-            ok(f"后付费模型列表已获取（{len(ids)} 个）")
+        chat = [m for m in _POSTPAID_DISCOVERED if not _POSTPAID_EXCLUDE.search(m)]
+        ok(f"后付费模型列表已获取（{len(_POSTPAID_DISCOVERED)} 个,其中聊天模型 {len(chat)} 个）")
     else:
         remote_models = fetch_remote_models(base_url, api_key)
         if remote_models:

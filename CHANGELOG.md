@@ -2,6 +2,23 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.2] - 2026-09-02
+
+### 修复
+
+- **后付费端点接错产品**:此前接 lkeap `/v3`(知识引擎老产品),
+  导致正确的 TokenHub Key 被误判 401。现按官方文档 1823/130058
+  修正为 `tokenhub.tencentmaas.com/v1`,Key 同在 TokenHub 控制台创建;
+  Claude Code 用标准 Anthropic 端点 `/v1/messages`(实测 200)
+
+### 改进
+
+- 后付费模型发现增加**聊天能力过滤**:tokenhub /v1/models 实测返回
+  130 个模型,其中约 100 个是视频/图像/语音/embedding 等非聊天能力,
+  现只把 32 个聊天模型写入工具配置,避免淹没模型下拉框
+
+[1.3.2]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.3.2
+
 ## [1.3.1] - 2026-09-02
 
 ### 修复

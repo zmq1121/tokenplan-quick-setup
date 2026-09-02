@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.6.0"
+VERSION = "2.0.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -707,53 +707,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        key="kilo-cli",
-        name="Kilo CLI",
-        backend="cli",
-        check_exe="kilo",
-        install_cmd=("npm", "install", "-g", "@kilocode/cli"),
-        start_hint="kilo",
-        cfg_hint="~/.config/kilo/kilo.jsonc",
-        usage_lines=(
-            "终端输入: kilo",
-            "首次配置: 启动后输入 /connect，Provider 类型选 OpenAI Compatible",
-            "Base URL: {base_url}",
-            "API Key: {api_key_mask}（完整 Key 见上方汇总或控制台）",
-            "配置文件: ~/.config/kilo/kilo.jsonc（编辑后需重启 CLI）",
-            "切换模型: /connect 中选择已配置的 Provider 后指定模型",
-        ),
-    ),
-    ToolSpec(
-        key="kilo-code",
-        name="Kilo Code",
-        backend="plugin",
-        check_exe=None,
-        install_cmd=("code", "--install-extension", "kilocode.kilocode"),
-        start_hint="code",
-        cfg_hint="VS Code → Kilo Code → Settings → Providers",
-        usage_lines=(
-            "VS Code 扩展面板确认 Kilo Code 已安装",
-            "打开 Kilo Code 面板 → Settings(齿轮) → Providers → 新建 API Profile",
-            "Provider 类型选 OpenAI Compatible，Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写，保存后即可使用",
-        ),
-    ),
-    ToolSpec(
-        key="cline",
-        name="Cline",
-        backend="plugin",
-        check_exe=None,
-        install_cmd=("code", "--install-extension", "saoudrizwan.claude-dev"),
-        start_hint="code",
-        cfg_hint="Cline 侧边栏 → 设置 → API Provider",
-        usage_lines=(
-            "VS Code 扩展面板确认 Cline 已安装",
-            "打开 Cline 侧边栏 → 设置(齿轮) → API Provider",
-            "Provider 选 OpenAI Compatible，Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写",
-        ),
-    ),
-    ToolSpec(
         key="workbuddy",
         name="WorkBuddy",
         backend="desktop",
@@ -765,44 +718,6 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "模型配置: 安装器已自动写入当前套餐全部模型到 ~/.workbuddy/models.json",
             "打开 WorkBuddy → 模型选择,即可看到 TokenPlan 开头的模型",
             "如需手动添加: 设置 → 模型/服务商,Base URL: {base_url}",
-        ),
-    ),
-    ToolSpec(
-        key="autoclaw",
-        name="AutoClaw",
-        backend="desktop",
-        check_exe=None,
-        download_url="https://autoclaw.ai",
-        usage_lines=(
-            "下载安装: https://autoclaw.ai（本地 AI 智能体）",
-            "在应用内设置中添加自定义模型接入",
-            "Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写",
-        ),
-    ),
-    ToolSpec(
-        key="qclaw",
-        name="QClaw",
-        backend="desktop",
-        check_exe=None,
-        download_url="https://qclaw.qq.com",
-        usage_lines=(
-            "下载安装: https://qclaw.qq.com（腾讯出品，微信远程办公 AI 助手）",
-            "在助手设置中添加自定义模型",
-            "Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写",
-        ),
-    ),
-    ToolSpec(
-        key="copaw",
-        name="CoPaw",
-        backend="desktop",
-        check_exe=None,
-        usage_lines=(
-            "开源 AI 智能体：获取渠道以项目官方发布为准",
-            "获得应用后，在设置中添加自定义 OpenAI Compatible 接入",
-            "Base URL: {base_url}",
-            "API Key 与模型 ID 按套餐填写",
         ),
     ),
 )
@@ -837,25 +752,6 @@ BACKEND_REGISTRY = {
             "打开 {name} → 设置 → 模型",
             "Base URL: {base_url}",
             "API Key:  {api_key_mask}",
-        ),
-    },
-    "plugin": {
-        "label": "VS Code 插件",
-        "auto_install": True,
-        "manual_download": False,
-        "requires": ("code",),
-        "usage_template": (
-            "在 VS Code 中打开插件面板",
-            "配置位置: {cfg_hint}",
-        ),
-    },
-    "deploy": {
-        "label": "部署场景",
-        "auto_install": False,
-        "manual_download": True,
-        "requires": (),
-        "usage_template": (
-            "本条目为云端部署场景，无需在本地安装应用",
         ),
     },
 }
@@ -1042,31 +938,8 @@ def ensure_npm_bin_on_path() -> None:
     info(f"npm 全局命令路径已加入: {npm_bin}")
 
 
-PLUGIN_EXTENSION_IDS = {
-    "cline": "saoudrizwan.claude-dev",
-    "kilo-code": "kilocode.kilocode",
-}
-
-
 def is_tool_installed(tool: ToolSpec) -> bool:
-    """Detect installation: shutil.which for CLI, code --list-extensions for plugins."""
-    if tool.backend == "plugin":
-        code = shutil.which("code")
-        extension_id = PLUGIN_EXTENSION_IDS.get(tool.key)
-        if not code or not extension_id:
-            return False
-        try:
-            result = subprocess.run(
-                [code, "--list-extensions"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return False
-        return extension_id.lower() in {
-            line.strip().lower() for line in result.stdout.splitlines()
-        }
+    """Detect installation via executable on PATH."""
     return bool(tool.check_exe and shutil.which(tool.check_exe))
 
 
@@ -1172,7 +1045,7 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
         info(f"当前平台: {sys.platform}")
 
     needs_node = any(
-        tool.backend in {"cli", "plugin"}
+        tool.backend == "cli"
         and get_install_command(tool)
         and any("npm" in part or "npx" in part for part in (get_install_command(tool) or ("",)))
         for tool in selected_tools
@@ -2100,8 +1973,6 @@ def choose_tools() -> List[ToolSpec]:
         tag = {
             "cli": f"{GREEN}自动安装{RESET}",
             "desktop": f"{YELLOW}需先下载{RESET}",
-            "plugin": f"{CYAN}VS Code{RESET}",
-            "deploy": f"{WHITE}部署场景{RESET}",
         }.get(tool.backend, f"{WHITE}{adapter.get('label', tool.backend)}{RESET}")
         print(f"     [{idx}] {tool.name:26s} {tag}")
     print()
@@ -2267,7 +2138,7 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
         if installed and configured is False:
             print("    建议: 运行 repair 子命令恢复配置(不会重装程序)")
         if not installed and should_manual_download(tool):
-            if tool.backend in {"desktop", "deploy"}:
+            if tool.backend == "desktop":
                 print("    接入方式: 手动获取应用，运行 setup 查看分步引导")
             else:
                 print("    将自动安装: 否（当前平台需手动安装）")
@@ -2684,7 +2555,7 @@ def main() -> None:
                 warn(f"请先下载 {tool.name}")
             if tool.download_url:
                 info(f"下载: {tool.download_url}")
-            if tool.backend in {"desktop", "deploy"} and tool.key not in CONFIGURATOR_REGISTRY:
+            if tool.backend == "desktop" and tool.key not in CONFIGURATOR_REGISTRY:
                 info("手动接入步骤:")
                 for line in render_usage_lines(tool, base_url, api_key):
                     info(f"  {line}")
@@ -2761,7 +2632,7 @@ def main() -> None:
         print(f"  {YELLOW}📝 需手动下载 {len(skipped)} 个工具:{RESET}")
         for tool in skipped:
             print(f"       {tool.name} — {tool.download_url or '见使用说明'}")
-            if tool.backend in {"desktop", "deploy"}:
+            if tool.backend == "desktop":
                 for line in render_usage_lines(tool, base_url, api_key):
                     print(f"         {line}")
     if failed:

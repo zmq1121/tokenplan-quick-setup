@@ -71,11 +71,11 @@ def sandbox(mod):
 
 def test_registry():
     mod = load_module()
-    check("14 个工具注册", len(mod.TOOLS) == 14)
+    check("8 个工具注册", len(mod.TOOLS) == 8)
     check("编号 1-6 为已验证工具(顺序稳定)",
           [t.key for t in mod.TOOLS[:6]] ==
           ["hermes", "codebuddy", "claude-code", "opencode", "openclaw", "dsh"])
-    check("索引 1-14 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 15)])
+    check("索引 1-8 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 9)])
     check("TOOL_BY_KEY 与 TOOLS 一致",
           set(mod.TOOL_BY_KEY) == {t.key for t in mod.TOOLS})
     check("每个配置器都有对应工具 key",
@@ -99,14 +99,11 @@ def test_registry():
 
 def test_registry_windows():
     mod = load_module(windows=True)
-    for key, first in [("codex", "npm"), ("kilo-cli", "npm"),
-                       ("kilo-code", "code"), ("cline", "code")]:
-        cmd = mod.get_install_command(mod.TOOL_BY_KEY[key])
-        check(f"Win: {key} 安装命令以 {first} 开头", cmd is not None and cmd[0] == first)
+    cmd = mod.get_install_command(mod.TOOL_BY_KEY["codex"])
+    check("Win: codex 安装命令以 npm 开头", cmd is not None and cmd[0] == "npm")
     check("Win: hermes 不自动安装", mod.get_install_command(mod.TOOL_BY_KEY["hermes"]) is None)
-    check("Win: 桌面工具走手动下载",
-          all(mod.should_manual_download(mod.TOOL_BY_KEY[k])
-              for k in ("workbuddy", "qclaw", "copaw", "autoclaw")))
+    check("Win: WorkBuddy 走手动下载",
+          mod.should_manual_download(mod.TOOL_BY_KEY["workbuddy"]))
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +478,9 @@ def test_doctor_config_probe():
     mod = load_module()
     tmp = sandbox(mod)
     tool = mod.TOOL_BY_KEY["codex"]
-    check("probe: 引导型工具返回 None", mod.probe_config(mod.TOOL_BY_KEY["qclaw"]) is None)
+    # 全部 8 个工具均有配置器,probe 只会返回 True/False;防御路径(None)已无实例
+    check("probe: 有签名工具返回布尔值",
+          isinstance(mod.probe_config(mod.TOOL_BY_KEY["codex"]), bool))
 
     # 未配置:文件不存在 → False
     check("probe: 配置文件缺失 → False", mod.probe_config(tool) is False)
@@ -619,7 +618,7 @@ def test_main_interactions():
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
     check("EOF: run mode 默认", "无输入，默认" in out)
     check("EOF: 工具默认全部", "默认选择全部工具" in out)
-    check("EOF: 配置 14 个", "正在配置 14 个工具" in out)
+    check("EOF: 配置 8 个", "正在配置 8 个工具" in out)
 
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
                "--tools", "codex"], ["1"])

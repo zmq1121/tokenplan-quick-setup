@@ -2,6 +2,31 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.0] - 2026-09-02
+
+### 破坏性变更:工具列表 14 → 8
+
+只保留安装器**真正自动写入配置**的工具,移除全部纯引导型条目:
+
+- 移除 Kilo CLI、Kilo Code、Cline(此前仅自动安装本体,配置靠
+  用户在向导/界面手动填写)
+- 移除 AutoClaw、QClaw、CoPaw(下载与配置均为手动)
+- 保留:7 个自动安装+自动配置的 CLI(Hermes/CodeBuddy/Claude
+  Code/OpenCode/OpenClaw/DSH/Codex)+ WorkBuddy(模型清单自动落盘)
+
+背景:支持声明与实际能力对齐。此前"17/14 个工具"的口径中,多数
+条目只是打印填写指引,README 却一并写作"支持"。火山方舟 arkcli
+的口径同样是只把 `helper configure` 能写入的目标算作支持;对无法
+写入模型配置的工具(如 TRAE/Cursor)其明确标注"不支持模型配置"。
+
+### 清理
+
+- 删除 plugin/deploy 后端及其全部死代码路径(插件检测、扩展 ID
+  表、VS Code 依赖检查、菜单标签)
+- `--tools` 不再接受已移除工具的编号/键名
+
+[2.0.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.0.0
+
 ## [1.6.0] - 2026-09-02
 
 ### 变更

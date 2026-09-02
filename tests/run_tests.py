@@ -298,6 +298,38 @@ def test_postpaid():
     chosen2 = mod.set_postpaid_selection(["nope-1", "nope-2"])
     check("自选: 所选全无效时保持全部", len(chosen2) == 4 and mod._POSTPAID_SELECTED is None)
 
+    # 5xx 瞬时错误重试:一次 502 后 200 → 成功;连续 502 → 如实失败
+    import urllib.error as _ue, io as _io2
+    calls = {"n": 0}
+    def _flaky(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _ue.HTTPError(req.full_url, 502, "Bad Gateway", {},
+                                _io2.BytesIO(b'{"error":{"message":"upstream"}}'))
+        return _io2.BytesIO(b'{"id":"x"}')
+    mod.urllib.request.urlopen = _flaky
+    mod.time.sleep = lambda s: None
+    passed, reason = mod.test_model("https://x", "sk-k", "m1")
+    check("验证重试: 502 后 200 → 成功", passed and calls["n"] == 2)
+    calls["n"] = 0
+    def _always502(req, timeout=None):
+        calls["n"] += 1
+        raise _ue.HTTPError(req.full_url, 502, "Bad Gateway", {},
+                            _io2.BytesIO(b'{"error":{"message":"upstream"}}'))
+    mod.urllib.request.urlopen = _always502
+    passed2, reason2 = mod.test_model("https://x", "sk-k", "m1")
+    check("验证重试: 连续 502 → 失败且注明疑似瞬时",
+          not passed2 and "瞬时" in reason2 and calls["n"] == 2)
+    # 4xx 不重试
+    calls["n"] = 0
+    def _always401(req, timeout=None):
+        calls["n"] += 1
+        raise _ue.HTTPError(req.full_url, 401, "Unauthorized", {},
+                            _io2.BytesIO(b'{"error":{"message":"no"}}'))
+    mod.urllib.request.urlopen = _always401
+    passed3, _ = mod.test_model("https://x", "sk-k", "m1")
+    check("验证重试: 401 不重试", not passed3 and calls["n"] == 1)
+
     # 交互选择:编号挑选
     mod._POSTPAID_SELECTED = None
     answers = iter(["1 3"])

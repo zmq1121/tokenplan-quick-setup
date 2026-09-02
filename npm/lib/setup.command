@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -2476,8 +2476,11 @@ def fetch_remote_models(base_url: str, api_key: str) -> Optional[List[str]]:
     return None
 
 
-def test_model(base_url: str, api_key: str, model: str) -> Tuple[bool, str]:
-    """Send a 1-token chat completion to verify a model end to end."""
+def _test_model_once(
+    base_url: str, api_key: str, model: str, retry_no5xx: bool = True,
+    prev_error: str = "",
+) -> Tuple[bool, str]:
+    """Single verification attempt; optionally retry once on 5xx gateway errors."""
     try:
         req = urllib.request.Request(
             f"{base_url}/chat/completions",
@@ -2495,9 +2498,22 @@ def test_model(base_url: str, api_key: str, model: str) -> Tuple[bool, str]:
         return True, ""
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
-        return False, f"HTTP {exc.code}: {_format_api_error(body, limit=100)}"
+        if retry_no5xx and 500 <= exc.code <= 599:
+            # 网关瞬时错误(upstream_error 等):稍候重试一次,避免误报
+            time.sleep(2)
+            return _test_model_once(base_url, api_key, model, retry_no5xx=False,
+                                    prev_error=f"HTTP {exc.code}")
+        detail = f"HTTP {exc.code}: {_format_api_error(body, limit=100)}"
+        if prev_error and 500 <= exc.code <= 599:
+            return False, f"{detail}（重试后仍失败,疑似服务端瞬时故障）"
+        return False, detail
     except Exception as exc:
         return False, str(exc)
+
+
+def test_model(base_url: str, api_key: str, model: str) -> Tuple[bool, str]:
+    """Verify a model end to end (with one retry on transient 5xx)."""
+    return _test_model_once(base_url, api_key, model)
 
 
 def verify_models(

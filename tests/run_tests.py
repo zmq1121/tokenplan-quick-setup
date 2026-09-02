@@ -253,8 +253,9 @@ def test_doctor_config_probe():
     cfg.write_text('model = "gpt-5"\n')
     check("probe: 签名被覆盖 → False", mod.probe_config(tool) is False)
 
-    # doctor 三态文案
+    # doctor 三态文案(安装状态与环境无关:CI 机器没有 codex,必须 mock)
     import contextlib, io as _io
+    mod.is_tool_installed = lambda t: True
     buf = _io.StringIO()
     with contextlib.redirect_stdout(buf):
         mod.run_doctor([tool])
@@ -265,6 +266,11 @@ def test_doctor_config_probe():
     with contextlib.redirect_stdout(buf2):
         mod.run_doctor([tool])
     check("doctor: 配置有效文案", "配置有效" in buf2.getvalue())
+    mod.is_tool_installed = lambda t: False
+    buf3 = _io.StringIO()
+    with contextlib.redirect_stdout(buf3):
+        mod.run_doctor([tool])
+    check("doctor: 未安装文案", "未安装" in buf3.getvalue() and "配置有效" not in buf3.getvalue())
 
 
 def test_install_timeout():

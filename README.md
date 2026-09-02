@@ -85,7 +85,7 @@ py -3 setup.command doctor
 | 10 | Cline | VS Code 插件自动安装 + Provider 引导 |
 | 11 | Cursor | 手动下载 + Settings→Models 分步引导 |
 | 12 | TRAE | 手动下载 + 自定义模型分步引导 |
-| 13 | WorkBuddy | 手动下载 + 自定义接入引导 |
+| 13 | WorkBuddy | 手动下载 + **套餐模型全量自动写入** |
 | 14 | Lighthouse OpenClaw | 云端部署场景引导（轻量应用服务器） |
 | 15 | AutoClaw | 手动下载 + 自定义接入引导 |
 | 16 | QClaw | 手动下载 + 自定义接入引导 |

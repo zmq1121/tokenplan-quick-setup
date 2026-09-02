@@ -19,3 +19,6 @@ Thumbs.db
 
 # 本地测试沙箱
 /tmp-*/
+
+# 本地运维存档,不入库
+docs/RELEASE-*.md

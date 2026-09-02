@@ -2,6 +2,29 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1] - 2026-09-02
+
+### 修复
+
+- **手动下载类工具(如 WorkBuddy)此前跳过了配置写入**:主循环把
+  manual_download 分支当作"完全跳过",选 13 只打印下载指引,
+  models.json 根本没写。现在该分支依然调用配置器(有配置器的工具),
+  输出"配置已写入(应用本体需自行下载安装)"
+- 工具菜单去掉"编程工具/龙虾工具"分组标题,17 项平铺
+
+[1.3.1]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.3.1
+
+## [1.3.0] - 2026-09-02
+
+### 新增
+
+- **后付费(按量计费)支持**:选项 8,端点 `api.lkeap.cloud.tencent.com/v3`,
+  模型列表运行时发现(/v3/models),Claude Code 动态槽位,
+  Anthropic 兼容端点 /v3/anthropic 已探活
+- 用户文档重写:按产品线分列 Key 获取地址,增加定位说明
+
+[1.3.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.3.0
+
 ## [1.2.0] - 2026-09-02
 
 ### 新增

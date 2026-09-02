@@ -2,6 +2,40 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.1.0] - 2026-09-02
+
+### 新增:四个 AI 编程工具(对标火山方舟 arkcli 的支持面)
+
+- **Kimi Code CLI**(Moonshot):写入 `~/.kimi-code/config.toml`,
+  openai provider + 套餐模型 + 默认模型;npm 自动安装
+- **Grok CLI**(xAI 官方):写入 `~/.grok/config.toml` 的
+  `[model.*]` 段,chat completions 协议;npm 自动安装
+- **Pi**(badlogic/pi-mono coding-agent):写入
+  `~/.pi/agent/models.json`,openai-completions provider;npm 自动安装
+- **ZCode**(智谱):写入 `~/.zcode/v2/config.json` 自定义 provider
+  (kind=openai-compatible);应用手动下载
+
+验证口径:Kimi Code / Grok CLI / Pi 均已**端到端实测**——安装器写入
+配置后,三个工具对 Token Plan 端点发起真实请求(假 key 得到网关
+401,证明链路通);ZCode 为闭源 Electron 客户端,配置格式经
+zcode-account-switcher 与 dsh-zcode-sync 两个第三方实现交叉确认,
+标注为配置层验证。工具列表 8 → 12。
+
+选型依据:火山方舟 arkcli `helper list` 认识 13 个 Agent,其中模型
+可配置的 11 个里我们已覆盖 10 个(独有 CodeBuddy;arkcli 独有
+ZCode 现已补齐);TRAE 与 Cursor 按 arkcli 官方结论(模型配置
+不支持)与既定决策排除。
+
+### 技术细节
+
+- `_toml_upsert_section` 支持数值/布尔字段(kimi 的
+  max_context_size 必须是裸数字,字符串会被 schema 拒绝)
+- TOML 顶层键(default_provider/default_model)必须位于首个表头
+  之前,`_toml_upsert_root_key` 已保证
+- ZCode provider id 使用 uuid5("tokenplan") 确定性生成,重跑幂等
+
+[2.1.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.1.0
+
 ## [2.0.0] - 2026-09-02
 
 ### 破坏性变更:工具列表 14 → 8

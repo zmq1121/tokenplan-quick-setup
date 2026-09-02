@@ -2,7 +2,7 @@
 
 ## 工具定位
 
-本工具是命令行配置安装器,用于将腾讯云大模型 API 的接入参数(服务端点、API Key、模型列表)写入 Claude Code、Codex 等 8 个 AI 编程工具的配置文件。
+本工具是命令行配置安装器,用于将腾讯云大模型 API 的接入参数(服务端点、API Key、模型列表)写入 Claude Code、Codex 等 12 个 AI 编程工具的配置文件。
 
 它属于配置类工具,与 skill/插件、模型服务是不同的概念:
 
@@ -82,11 +82,11 @@ bash setup.command
 
 **步骤三:选择运行模式**。直接回车采用标准模式。
 
-**步骤四:选择工具**。列出 8 个工具,直接回车配置全部;输入编号(逗号或空格分隔,如 `3,7,8`)仅配置指定工具。
+**步骤四:选择工具**。列出 12 个工具,直接回车配置全部;输入编号(逗号或空格分隔,如 `3,7,12`)仅配置指定工具。
 
 确认后自动执行:未安装的工具自动安装,配置自动写入,完成后逐项显示结果。
 
-桌面应用中仅 WorkBuddy 支持自动写入(模型清单直接落盘);其余桌面应用不在支持范围内。
+桌面应用中 WorkBuddy 与 ZCode 支持自动写入(模型清单直接落盘);其余桌面应用不在支持范围内。
 
 ## 配置完成后
 
@@ -100,7 +100,7 @@ bash setup.command
 
 WorkBuddy 为桌面应用,打开后模型列表已写入完成。
 
-支持的 8 个工具:Hermes Agent、CodeBuddy Code、Claude Code、OpenCode、OpenClaw、DeepSeek Harness、Codex CLI、WorkBuddy。
+支持的 12 个工具:Hermes Agent、CodeBuddy Code、Claude Code、OpenCode、OpenClaw、DeepSeek Harness、Codex CLI、WorkBuddy、Kimi Code、Grok CLI、Pi、ZCode。
 
 ## 维护命令
 
@@ -142,7 +142,7 @@ macOS 默认不执行未知来源的脚本,请按"运行方式"一节在终端�
 bash setup.command --plan postpaid --api-key <KEY> --models glm-5.3,kimi-k3 --yes
 ```
 
-后付费支持全部 8 个工具,与套餐一致。
+后付费支持全部 12 个工具,与套餐一致。
 
 **安装中断或网络超时**
 

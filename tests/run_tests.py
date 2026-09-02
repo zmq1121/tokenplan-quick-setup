@@ -71,11 +71,11 @@ def sandbox(mod):
 
 def test_registry():
     mod = load_module()
-    check("8 个工具注册", len(mod.TOOLS) == 8)
+    check("12 个工具注册", len(mod.TOOLS) == 12)
     check("编号 1-6 为已验证工具(顺序稳定)",
           [t.key for t in mod.TOOLS[:6]] ==
           ["hermes", "codebuddy", "claude-code", "opencode", "openclaw", "dsh"])
-    check("索引 1-8 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 9)])
+    check("索引 1-12 连续", sorted(mod.TOOL_BY_INDEX, key=int) == [str(i) for i in range(1, 13)])
     check("TOOL_BY_KEY 与 TOOLS 一致",
           set(mod.TOOL_BY_KEY) == {t.key for t in mod.TOOLS})
     check("每个配置器都有对应工具 key",
@@ -472,6 +472,89 @@ def test_write_json_list_merge():
 
 
 # ---------------------------------------------------------------------------
+# 测试组: Kimi/Grok/Pi/ZCode 配置器(arkcli 对标新增)
+
+def test_new_tool_configs():
+    mod = load_module()
+    tmp = sandbox(mod)
+    mod._REMOTE_CATALOG = None
+    plan = mod.PLAN_CATALOG["1"]  # 个人通用,10 模型
+    base = "https://tokenhub.tencentmaas.com/plan/v3"
+    key = "sk-new-tools-1234567890"
+
+    import contextlib, io as _io
+    buf = _io.StringIO()
+    real_run = mod.subprocess.run
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.configure_kimi(base, key, plan)
+            mod.configure_grok(base, key, plan)
+            mod.configure_pi(base, key, plan)
+            mod.configure_zcode(base, key, plan)
+    finally:
+        mod.subprocess.run = real_run
+
+    models = mod.get_model_ids(plan.key)
+
+    # Kimi Code: config.toml
+    toml = (tmp / ".kimi-code" / "config.toml").read_text()
+    check("kimi: provider 段", "[providers.tokenplan]" in toml)
+    check("kimi: 默认模型", 'default_model = "%s"' % models[0] in toml)
+    check("kimi: 默认 provider", 'default_provider = "tokenplan"' in toml)
+    check("kimi: 默认键在首个表头之前(顶层)",
+          toml.index("default_provider") < toml.index("[providers.tokenplan]"))
+    check("kimi: 模型段数", toml.count("[models.") == len(models))
+    check("kimi: max_context_size 必填字段", "max_context_size" in toml)
+    with contextlib.redirect_stdout(buf):
+        mod.configure_kimi(base, key, plan)
+    toml2 = (tmp / ".kimi-code" / "config.toml").read_text()
+    check("kimi: 幂等重跑不重复", toml2.count("[providers.tokenplan]") == 1
+          and toml2.count("[models.") == len(models))
+
+    # Grok: config.toml
+    gtoml = (tmp / ".grok" / "config.toml").read_text()
+    check("grok: 模型段数", gtoml.count("[model.") == len(models))
+    check("grok: base_url 写入", base in gtoml)
+    check("grok: 托管标记", "# Token Plan models begin" in gtoml)
+    with contextlib.redirect_stdout(buf):
+        mod.configure_grok(base, key, plan)
+    gtoml2 = (tmp / ".grok" / "config.toml").read_text()
+    check("grok: 幂等重跑不重复", gtoml2.count("[model.") == len(models))
+
+    # Pi: models.json
+    pdata = json.loads((tmp / ".pi" / "agent" / "models.json").read_text())
+    check("pi: provider 注册", "tokenplan" in pdata["providers"])
+    prov = pdata["providers"]["tokenplan"]
+    check("pi: openai-completions 协议", prov["api"] == "openai-completions")
+    check("pi: 模型数", len(prov["models"]) == len(models))
+    check("pi: 模型 id 结构", prov["models"][0]["id"] == models[0])
+
+    # ZCode: config.json
+    zdata = json.loads((tmp / ".zcode" / "v2" / "config.json").read_text())
+    zprov = list(zdata["provider"].values())[0]
+    check("zcode: kind", zprov["kind"] == "openai-compatible")
+    check("zcode: baseURL", zprov["options"]["baseURL"] == base)
+    check("zcode: 模型数", len(zprov["models"]) == len(models))
+    check("zcode: limit 结构", "context" in list(zprov["models"].values())[0]["limit"])
+    with contextlib.redirect_stdout(buf):
+        mod.configure_zcode(base, key, plan)
+    zdata2 = json.loads((tmp / ".zcode" / "v2" / "config.json").read_text())
+    check("zcode: 幂等(provider 不翻倍)", len(zdata2["provider"]) == 1)
+
+    # 权限:含 Key 的文件全部 0600(POSIX)
+    if hasattr(os, "stat") and not sys.platform.startswith("win"):
+        for rel in (".kimi-code/config.toml", ".grok/config.toml",
+                    ".pi/agent/models.json", ".zcode/v2/config.json"):
+            p = tmp / rel
+            check(f"权限 0600: {rel}", (p.stat().st_mode & 0o777) == 0o600)
+
+    # doctor 签名可用
+    for k in ("kimi", "grok", "pi", "zcode"):
+        check(f"doctor 签名生效: {k}",
+              mod.probe_config(mod.TOOL_BY_KEY[k]) is True)
+
+
 # 测试组: doctor 配置三态 / 超时 / 版本感知
 
 def test_doctor_config_probe():
@@ -618,7 +701,7 @@ def test_main_interactions():
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
     check("EOF: run mode 默认", "无输入，默认" in out)
     check("EOF: 工具默认全部", "默认选择全部工具" in out)
-    check("EOF: 配置 8 个", "正在配置 8 个工具" in out)
+    check("EOF: 配置 12 个", "正在配置 12 个工具" in out)
 
     out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
                "--tools", "codex"], ["1"])
@@ -766,6 +849,7 @@ TEST_GROUPS = [
     ("permissions", test_permissions),
     ("postpaid", test_postpaid),
     ("workbuddy", test_workbuddy_config),
+    ("new-tools", test_new_tool_configs),
     ("list-merge", test_write_json_list_merge),
     ("doctor-probe", test_doctor_config_probe),
     ("timeout", test_install_timeout),

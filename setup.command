@@ -14,13 +14,14 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -718,6 +719,63 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "模型配置: 安装器已自动写入当前套餐全部模型到 ~/.workbuddy/models.json",
             "打开 WorkBuddy → 模型选择,即可看到 TokenPlan 开头的模型",
             "如需手动添加: 设置 → 模型/服务商,Base URL: {base_url}",
+        ),
+    ),
+    ToolSpec(
+        key="kimi",
+        name="Kimi Code",
+        backend="cli",
+        check_exe="kimi",
+        install_cmd=("npm", "install", "-g", "@moonshot-ai/kimi-code"),
+        start_hint="kimi",
+        cfg_hint="~/.kimi-code/config.toml",
+        usage_lines=(
+            "终端输入: kimi",
+            "安装器已写入 tokenplan provider 与套餐模型(config.toml),默认模型已设为套餐默认",
+            "切换模型: 会话内 /model,或 kimi -m <模型别名>",
+            "配置文件: ~/.kimi-code/config.toml",
+        ),
+    ),
+    ToolSpec(
+        key="grok",
+        name="Grok CLI",
+        backend="cli",
+        check_exe="grok",
+        install_cmd=("npm", "install", "-g", "@xai-official/grok"),
+        start_hint="grok",
+        cfg_hint="~/.grok/config.toml",
+        usage_lines=(
+            "终端输入: grok",
+            "安装器已写入套餐模型到 ~/.grok/config.toml 的 [model.*] 段",
+            "切换模型: 会话内 /model,或 grok -m <模型名>",
+        ),
+    ),
+    ToolSpec(
+        key="pi",
+        name="Pi",
+        backend="cli",
+        check_exe="pi",
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"),
+        start_hint="pi",
+        cfg_hint="~/.pi/agent/models.json",
+        usage_lines=(
+            "终端输入: pi",
+            "安装器已写入 tokenplan provider 与套餐模型(models.json)",
+            "切换模型: 会话内 /model,或 pi --model tokenplan/<模型>",
+        ),
+    ),
+    ToolSpec(
+        key="zcode",
+        name="ZCode",
+        backend="desktop",
+        check_exe=None,
+        download_url="https://zcode.ai",
+        cfg_hint="~/.zcode/v2/config.json",
+        usage_lines=(
+            "下载安装: https://zcode.ai(智谱 ZCode 客户端)",
+            "安装器已写入自定义 provider 与套餐模型到 ~/.zcode/v2/config.json",
+            "启动 ZCode 后在模型选择中使用 Tencent Cloud Token Plan 条目",
+            "该客户端为闭源应用,配置写入未经官方端到端验证,如异常请在应用内手动添加",
         ),
     ),
 )
@@ -1769,6 +1827,48 @@ def install_codex_shell_env(api_key: str) -> None:
     os.environ["TOKENPLAN_API_KEY"] = api_key
 
 
+_ZCODE_PROVIDER_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "tokenplan"))
+
+
+def _display_name(catalog: Dict[str, object], model_id: str) -> str:
+    """Human label for a model id from the catalog display lines."""
+    for line in catalog.get("display", ()):
+        if ":" not in line:
+            continue
+        label, mid = line.split(":", 1)
+        if mid.strip().split(" ", 1)[0] == model_id:
+            return label.strip()
+    return model_id
+
+
+def _read_json_object(path: Path) -> Dict[str, object]:
+    """Read a JSON object, tolerating missing/corrupt files (start fresh)."""
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _strip_managed_block(lines: List[str], begin: str, end: str) -> List[str]:
+    """Remove an inclusive managed marker block from TOML lines."""
+    out: List[str] = []
+    inside = False
+    for line in lines:
+        if line.strip() == begin:
+            inside = True
+            continue
+        if line.strip() == end:
+            inside = False
+            continue
+        if not inside:
+            out.append(line)
+    return out
+
+
 def _toml_upsert_root_key(lines: List[str], key: str, value: str) -> List[str]:
     """Set a root-level TOML key (before the first table header), preserving the rest."""
     rendered = f'{key} = "{value}"'
@@ -1790,7 +1890,14 @@ def _toml_upsert_section(
     lines: List[str], header: str, entries: Dict[str, str]
 ) -> List[str]:
     """Create or update a [table] section; unknown lines inside are preserved."""
-    rendered_entries = [f'{k} = "{v}"' for k, v in entries.items()]
+    def _render(k: str, v: object) -> str:
+        if isinstance(v, bool):
+            return f"{k} = {'true' if v else 'false'}"
+        if isinstance(v, (int, float)):
+            return f"{k} = {v}"
+        return f'{k} = "{v}"'
+
+    rendered_entries = [_render(k, v) for k, v in entries.items()]
     start = None
     for i, line in enumerate(lines):
         if line.strip() == header:
@@ -1813,7 +1920,7 @@ def _toml_upsert_section(
         for k, v in entries.items():
             if stripped.startswith(f"{k} ") or stripped.startswith(f"{k}="):
                 if k not in handled:
-                    kept.append(f"{k} = \"{v}\"")
+                    kept.append(_render(k, v))
                     handled.add(k)
                 matched = True
                 break
@@ -1821,7 +1928,7 @@ def _toml_upsert_section(
             kept.append(line)
     for k, v in entries.items():
         if k not in handled:
-            kept.append(f"{k} = \"{v}\"")
+            kept.append(_render(k, v))
     return lines[:start + 1] + kept + lines[end:]
 
 
@@ -1854,6 +1961,176 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
     info(f"Codex 已配置: {config_path} (model = {default_model})")
 
 
+def _kimi_home() -> Path:
+    home = os.environ.get("KIMI_CODE_HOME")
+    return Path(home) if home else HOME / ".kimi-code"
+
+
+def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Configure Kimi Code CLI (~/.kimi-code/config.toml) as an OpenAI-compatible provider.
+
+    Schema (kimi-code 0.40.x): top-level default_provider/default_model must
+    appear BEFORE any [table] header (TOML rule); [providers.<id>] carries
+    type/base_url/api_key; [models.<id>] requires provider + model +
+    max_context_size (display_name optional). Verified end-to-end against
+    the Token Plan chat-completions endpoint.
+    """
+    home = _kimi_home()
+    home.mkdir(parents=True, exist_ok=True)
+    config_path = home / "config.toml"
+    existing_lines = (
+        config_path.read_text().splitlines() if config_path.exists() else []
+    )
+    backup_file(config_path)
+    catalog = get_model_catalog(plan.key)
+    default_model = str(catalog["default"])
+    lines = _toml_upsert_root_key(existing_lines, "default_provider", "tokenplan")
+    lines = _toml_upsert_root_key(lines, "default_model", default_model)
+    lines = _toml_upsert_section(
+        lines,
+        "[providers.tokenplan]",
+        {
+            "type": "openai",
+            "base_url": base_url,
+            "api_key": api_key,
+        },
+    )
+    for model_id in get_model_ids(plan.key):
+        display = _display_name(catalog, model_id)
+        lines = _toml_upsert_section(
+            lines,
+            f"[models.{model_id}]",
+            {
+                "provider": "tokenplan",
+                "model": model_id,
+                "display_name": display,
+                "max_context_size": 128000,
+            },
+        )
+    config_path.write_text("\n".join(lines).rstrip() + "\n")
+    _harden(config_path)
+    info(f"Kimi Code 已配置: {config_path} ({len(get_model_ids(plan.key))} 个模型)")
+
+
+def _grok_home() -> Path:
+    home = os.environ.get("GROK_HOME")
+    return Path(home) if home else HOME / ".grok"
+
+
+def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Configure Grok CLI (~/.grok/config.toml) custom models.
+
+    Grok models are flat [model.<id>] tables; api_backend defaults to
+    chat_completions, which Token Plan exposes on every site. Verified
+    end-to-end: grok sent requests to <base_url>/chat/completions.
+    """
+    home = _grok_home()
+    home.mkdir(parents=True, exist_ok=True)
+    config_path = home / "config.toml"
+    existing = config_path.read_text() if config_path.exists() else ""
+    backup_file(config_path)
+    catalog = get_model_catalog(plan.key)
+    # 移除旧的 tokenplan 托管块(模型集合可能变化),再重写
+    lines = _strip_managed_block(existing.splitlines(), "# Token Plan models begin", "# Token Plan models end")
+    block: List[str] = ["", "# Token Plan models begin"]
+    for model_id in get_model_ids(plan.key):
+        display = _display_name(catalog, model_id)
+        block.append(f"[model.{model_id}]")
+        block.append(f'model = "{model_id}"')
+        block.append(f'base_url = "{base_url}"')
+        block.append(f'name = "{display}"')
+        block.append(f'api_key = "{api_key}"')
+        block.append("")
+    block.append("# Token Plan models end")
+    lines = lines + block
+    config_path.write_text("\n".join(lines).rstrip() + "\n")
+    _harden(config_path)
+    info(f"Grok 已配置: {config_path} ({len(get_model_ids(plan.key))} 个模型)")
+
+
+def _pi_agent_dir() -> Path:
+    override = os.environ.get("PI_CODING_AGENT_DIR")
+    if override:
+        return Path(override)
+    config_dir = os.environ.get("PI_CONFIG_DIR")
+    base = Path(config_dir) if config_dir else HOME / ".pi"
+    return base / "agent"
+
+
+def configure_pi(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Configure the Pi coding agent (~/.pi/agent/models.json).
+
+    Provider entry under providers.tokenplan with api openai-completions;
+    models need only id (name/context defaults apply). Verified
+    end-to-end: pi listed the provider and reached the Token Plan endpoint.
+    """
+    agent_dir = _pi_agent_dir()
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    models_path = agent_dir / "models.json"
+    data = _read_json_object(models_path)
+    backup_file(models_path)
+    catalog = get_model_catalog(plan.key)
+    models = []
+    for model_id in get_model_ids(plan.key):
+        entry: Dict[str, object] = {"id": model_id, "name": _display_name(catalog, model_id)}
+        models.append(entry)
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    providers["tokenplan"] = {
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": api_key,
+        "models": models,
+    }
+    data["providers"] = providers
+    models_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    _harden(models_path)
+    info(f"Pi 已配置: {models_path} ({len(models)} 个模型)")
+
+
+def _zcode_v2_dir() -> Path:
+    home = os.environ.get("ZCODE_HOME")
+    base = Path(home) if home else HOME / ".zcode"
+    return base / "v2"
+
+
+def configure_zcode(base_url: str, api_key: str, plan: PlanSpec) -> None:
+    """Configure ZCode (~/.zcode/v2/config.json) as a custom provider.
+
+    ZCode (z.ai coding client) keeps custom providers in config.json:
+    provider.<id> = {name, kind, options{baseURL, apiKey}, models{<id>}}.
+    ids must not start with builtin:; a deterministic UUID keeps reruns
+    idempotent. Config-layer tested (format cross-confirmed by two
+    third-party ZCode tools); the closed client itself is not verified.
+    """
+    v2 = _zcode_v2_dir()
+    v2.mkdir(parents=True, exist_ok=True)
+    config_path = v2 / "config.json"
+    data = _read_json_object(config_path)
+    backup_file(config_path)
+    catalog = get_model_catalog(plan.key)
+    models: Dict[str, object] = {}
+    for model_id in get_model_ids(plan.key):
+        models[model_id] = {
+            "name": _display_name(catalog, model_id),
+            "limit": {"context": 128000, "output": 16384},
+        }
+    providers = data.get("provider")
+    if not isinstance(providers, dict):
+        providers = {}
+    providers[_ZCODE_PROVIDER_ID] = {
+        "name": "Tencent Cloud Token Plan",
+        "kind": "openai-compatible",
+        "options": {"baseURL": base_url, "apiKey": api_key},
+        "models": models,
+    }
+    data["provider"] = providers
+    config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    _harden(config_path)
+    info(f"ZCode 已配置: {config_path} ({len(models)} 个模型,客户端未实测)")
+
+
 CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "workbuddy": configure_workbuddy,
     "codebuddy": configure_codebuddy,
@@ -1863,6 +2140,10 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "openclaw": configure_openclaw,
     "opencode": configure_opencode,
     "codex": configure_codex,
+    "kimi": configure_kimi,
+    "grok": configure_grok,
+    "pi": configure_pi,
+    "zcode": configure_zcode,
 }
 
 # doctor 用来判断"我们的配置块是否还在"的签名:工具 key -> (HOME 相对路径, 特征串)。
@@ -1876,6 +2157,10 @@ CONFIG_SIGNATURES: Dict[str, Tuple[str, str]] = {
     "dsh": (".dsh/settings.yaml", "tokenplan"),
     "codex": (".codex/config.toml", "[model_providers.tokenplan]"),
     "workbuddy": (".workbuddy/models.json", "Tencent Cloud Token Plan"),
+    "kimi": (".kimi-code/config.toml", "[providers.tokenplan]"),
+    "grok": (".grok/config.toml", "# Token Plan models begin"),
+    "pi": (".pi/agent/models.json", '"tokenplan"'),
+    "zcode": (".zcode/v2/config.json", "Tencent Cloud Token Plan"),
 }
 
 

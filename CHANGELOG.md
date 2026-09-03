@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-09-04
+
+### 修复
+
+- Windows Mypy：改用 `getattr(ctypes, "windll")` 与
+  `getattr(sys, "getwindowsversion")()`，避免 `type: ignore[attr-defined]`
+  在 Windows 被判定为未使用、在非 Windows 又必须存在的跨平台冲突
+
 ## [2.7.2] - 2026-09-03
 
 ### 修复

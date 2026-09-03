@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.7.2"
+VERSION = "2.7.3"
 
 # ── 品牌口径(集中定义;所有工具配置里用户可见的名称由此派生) ──────────────
 # 接入平台是腾讯云 TokenHub(端点域名/控制台口径)。2.5.x 及之前曾以
@@ -228,7 +228,7 @@ def enable_windows_ansi() -> None:
     try:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = getattr(ctypes, "windll").kernel32
         handle = kernel32.GetStdHandle(-11)
         mode = ctypes.c_uint32()
         if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):

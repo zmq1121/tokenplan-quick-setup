@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokenplan-setup"
-version = "2.7.2"
+version = "2.7.3"
 description = "腾讯云 TokenHub 一键接入 CLI"
 readme = "README.md"
 requires-python = ">=3.9"

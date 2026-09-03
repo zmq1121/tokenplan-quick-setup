@@ -353,7 +353,7 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
             warn(f"未验证的 Mac 架构: {architecture}")
     elif IS_WINDOWS:
         try:
-            win_ver = sys.getwindowsversion()  # type: ignore[attr-defined]
+            win_ver = getattr(sys, "getwindowsversion")()
             info(f"Windows {win_ver.major}.{win_ver.minor} (build {win_ver.build})")
         except AttributeError:
             info("Windows")

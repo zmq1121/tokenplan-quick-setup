@@ -29,11 +29,17 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 `setup.bat` 运行后从固定版本的 Release 附件下载主脚本(多镜像回退)并做 SHA256 校验,通过后执行。Mac 上首次运行若提示无法验证开发者,右键文件选择"打开"并确认。
 
+### 安装器自身的安全口径
+
+- **远程安装脚本**(Hermes / OpenClaw,macOS):先完整下载到本地、展示来源 URL 与 SHA256 指纹、经确认后才执行;非交互环境一律拒绝(用 `--yes` 跳过确认,指纹仍会打印)
+- **npm 安装**统一 `--ignore-scripts`,拦截安装期 lifecycle 脚本(供应链攻击重点面;这些 CLI 均通过平台包分发二进制,不需要安装脚本)
+- **远程模型目录**(`models.json`)带 SHA256 完整性校验,哈希对不上或拿不到哈希文件时回退内置目录
+- API Key 永不全量回显(终端与 `--json` 输出均打码);写入的配置文件权限收紧为 `0600`
+
 ## 运行环境
 
 - macOS 12+ 或 Windows 10/11,已安装 Python 3(Windows 推荐 `winget install Python.Python.3.12`,安装时勾选 Add to PATH)
 - 安装 CLI 类工具(Claude Code、Codex 等)需要 Node.js LTS;未安装时安装器会尝试自动安装
-- Hermes Agent 与 OpenClaw 的安装脚本需要 curl
 
 首次安装 CLI 后如提示 `command not found`,重新打开终端或执行 `source ~/.zshrc`。
 
@@ -104,9 +110,31 @@ bash setup.command uninstall  # 从备份还原全部修改
 
 常用参数:`--plan`、`--api-key`、`--tools`、`--models`(后付费)、`--yes`、`--verify-models`。
 
+### 退出码
+
+`0` 成功 | `1` 用户取消 | `2` 环境不满足 | `3` 部分工具配置失败。脚本/CI 无需解析文案即可判断成败:
+
+```bash
+bash setup.command --plan enterprise-pro --api-key "$TOKENPLAN_API_KEY" --yes --json > result.json
+echo "exit=$?"
+```
+
+### API Key 的传入方式
+
+优先级:`--api-key` 参数 > 环境变量 `TOKENPLAN_API_KEY` > 交互输入。命令行参数会留在 shell 历史里,自动化场景推荐环境变量。
+
+### 结构化输出(--json)
+
+`setup` 与 `doctor` 支持 `--json`:过程日志转 stderr,stdout 只输出结果 JSON(密钥打码)。doctor 另支持 `--deep --plan <key>`:真实调用一次对话接口验证套餐默认模型端到端可用(需 API Key,按量计费套餐消耗极少量 token)。
+
+```bash
+bash setup.command doctor --json                    # 全部工具的诊断快照
+bash setup.command doctor --deep --plan enterprise-pro --api-key <KEY>
+```
+
 ## 模型目录更新机制
 
-模型目录有两级来源:优先读取仓库根目录的 [models.json](models.json)(经 jsDelivr CDN 分发),获取失败时使用脚本内置目录。模型发生增减时修改 models.json 并提交即可,已分发的旧安装文件下次运行时自动获取新列表;`latest_version` 字段用于向旧版本文件提示升级。
+模型目录有两级来源:优先读取仓库根目录的 [models.json](models.json)(经 jsDelivr CDN 分发),获取失败或 SHA256 校验不通过([models.json.sha256](models.json.sha256),由 `scripts/sync_npm_lib.py` 自动再生)时使用脚本内置目录。模型发生增减时修改 models.json 并提交即可,已分发的旧安装文件下次运行时自动获取新列表;`latest_version` 字段用于向旧版本文件提示升级。
 
 个人版套餐会额外调用 API `/models` 交叉核对;企业版端点不提供该 API,以目录为准。`python3 scripts/check_models.py` 可将目录与官方文档对照校验。
 
@@ -143,10 +171,10 @@ claude-tokenplan           # 列出当前套餐全部模型,选择后启动
 ## 开发与测试
 
 ```bash
-python3 tests/run_tests.py          # 回归测试(135 项,零依赖)
+python3 tests/run_tests.py          # 回归测试(229 项,零依赖)
 python3 tests/run_tests.py codex    # 运行单个测试组
 python3 scripts/check_models.py     # 模型目录与官方文档对照
-python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 产物
+python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 产物(并再生 models.json.sha256)
 ```
 
-测试通过 exec 直接加载 `setup.command`,覆盖注册表完整性、配置器端到端、Windows 平台行为、卸载生命周期、文件权限、交互流 EOF 安全、远程目录回退等。发布 npm 前必须先通过测试再执行同步,一致性校验失败会直接报错。
+测试通过 exec 直接加载 `setup.command`,覆盖注册表完整性、配置器端到端、Windows 平台行为、卸载生命周期、文件权限、交互流 EOF 安全、远程目录回退与哈希校验、远程脚本 fail-closed、退出码契约、`--json` 输出等。发布 npm 前必须先通过测试再执行同步,一致性校验失败会直接报错。

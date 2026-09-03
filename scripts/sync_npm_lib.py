@@ -22,9 +22,30 @@ if not src.exists():
     print(f"missing {src}", file=sys.stderr)
     sys.exit(1)
 
+# 主脚本版本号(注入 setup.bat / 维护 models.json.latest_version 共用)
+m = re.search(r'^VERSION = "([^"]+)"', src.read_text(encoding="utf-8"), re.M)
+if not m:
+    print("VERSION not found in setup.command", file=sys.stderr)
+    sys.exit(1)
+version = m.group(1)
+
 dst.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(src, dst)
 print(f"synced {dst.relative_to(REPO)} ({src.stat().st_size} bytes)")
+
+# models.json.latest_version:旧安装器据此提示升级(notify_upgrade_available)。
+# 手工维护曾在 2.5.0/2.6.0 连续漏更,这里改为随 sync 自动对齐主脚本版本,
+# 先改内容再算哈希,保证"改了目录忘刷哈希"不可能发生。
+catalog_text = catalog.read_text(encoding="utf-8")
+new_catalog = re.sub(
+    r'("latest_version"\s*:\s*")[^"]+',
+    rf'\g<1>{version}',
+    catalog_text,
+    count=1,
+)
+if new_catalog != catalog_text:
+    catalog.write_text(new_catalog, encoding="utf-8")
+    print(f"models.json latest_version -> {version}")
 
 # models.json.sha256:与 models.json 字节严格对应(refresh_remote_catalog 会校验)
 if catalog.exists():
@@ -40,11 +61,6 @@ else:
     sys.exit(1)
 
 # setup.bat:注入版本号与主脚本 SHA256(固定版本下载 + 完整性校验)
-m = re.search(r'^VERSION = "([^"]+)"', src.read_text(encoding="utf-8"), re.M)
-if not m:
-    print("VERSION not found in setup.command", file=sys.stderr)
-    sys.exit(1)
-version = m.group(1)
 sha256 = hashlib.sha256(src.read_bytes()).hexdigest()
 
 bat_text = bat.read_bytes().decode("utf-8")  # 二进制读,保留 CRLF(Windows 批处理要求)

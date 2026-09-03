@@ -824,6 +824,17 @@ def test_repo_consistency():
     pkg = json.loads(NPM_PKG.read_text(encoding="utf-8"))
     check("版本号: 主脚本与 npm 包一致", bool(ver) and ver.group(1) == pkg["version"])
 
+    # latest_version 驱动旧安装器的升级提示(notify_upgrade_available),
+    # 必须与主脚本版本一致——2.5.0/2.6.0 曾连续漏更,现由 sync 脚本
+    # 自动维护 + 此处守卫
+    try:
+        latest = json.loads((REPO / "models.json").read_text(encoding="utf-8")) \
+            .get("latest_version", "")
+    except ValueError:
+        latest = ""
+    check("models.json: latest_version 与主脚本一致(升级提示有效)",
+          bool(ver) and latest == ver.group(1))
+
     names = re.findall(r"^def ([a-zA-Z_]\w*)", src, re.M)
     dead = [n for n in names if len(re.findall(rf"\b{n}\b", src)) <= 1]
     check("无死代码(零引用函数)", dead == [] or print(f"  (死代码: {dead})") is None and not dead)

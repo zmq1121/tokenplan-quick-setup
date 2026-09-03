@@ -10,3 +10,10 @@ setup.bat text eol=crlf
 *.py text=auto
 *.md text=auto
 *.json text=auto
+
+# 模型目录及其哈希文件:完整性契约要求所有平台检出为相同字节
+# (models.json 经 CDN 分发的是仓库原始 LF 字节,models.json.sha256
+# 记录的摘要与其对应;若检出时被转为 CRLF,哈希校验必然失败)
+# 注意:必须放在 *.json 之后 —— gitattributes 后行覆盖前行
+models.json text eol=lf
+models.json.sha256 text eol=lf

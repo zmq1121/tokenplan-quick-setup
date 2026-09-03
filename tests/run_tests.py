@@ -49,16 +49,29 @@ def load_module(windows: bool = False):
     mod = types.ModuleType("setup_under_test")
     mod.__package__ = "tokenplan_setup"
 
+    replaced = {"hit": False}
+
     def transform(_path: Path, source: str) -> str:
         if windows:
-            return source.replace(
+            out = source.replace(
                 'IS_WINDOWS = sys.platform == "win32"',
                 "IS_WINDOWS = True",
                 1,
             )
+            # 源码重排会让字面量替换静默落空:Windows 语义组将在 POSIX
+            # 语义下假绿(registry-windows 组的断言恰好两侧皆真,兜不住)。
+            # 必须在加载点立即发现,而不是等某个行为性差异组莫名失败。
+            if out != source:
+                replaced["hit"] = True
+            return out
         return source
 
     execute_sources(mod.__dict__, transform)
+    if windows and not replaced["hit"]:
+        raise AssertionError(
+            "load_module(windows=True) 未命中 IS_WINDOWS 定义——"
+            "源码结构已变化,请同步更新替换目标"
+        )
     return mod
 
 
@@ -91,8 +104,6 @@ def test_registry():
           set(mod.TOOL_BY_KEY) == {t.key for t in mod.TOOLS})
     check("每个配置器都有对应工具 key",
           set(mod.CONFIGURATOR_REGISTRY) <= set(mod.TOOL_BY_KEY))
-    check("plugin 工具都有扩展 ID",
-          all(t.key in mod.PLUGIN_EXTENSION_IDS for t in mod.TOOLS if t.backend == "plugin"))
     check("backend 全部已注册", all(t.backend in mod.BACKEND_REGISTRY for t in mod.TOOLS))
     check("9 个套餐(4 中国站 + 3 国际站套餐 + 2 后付费)",
           len(mod.PLAN_CATALOG) == 9)
@@ -159,6 +170,21 @@ def test_codex_config():
     tmp = sandbox(mod)
     plan = mod.PLAN_CATALOG["3"]
     base, key = "https://tokenhub.tencentmaas.com/plan/v3", "sk-test-1234567890"
+
+    # Windows 上 install_codex_shell_env 走真实 reg query + setx(写注册表);
+    # stub 掉 subprocess.run(os.environ 注入在调用前完成,断言不受影响)。
+    # 对齐 test_postpaid 里 WorkBuddy 段的既有做法。
+    _real_run = mod.subprocess.run
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 0,
+                                                        "stdout": "",
+                                                        "stderr": ""})()
+    try:
+        _codex_config_body(mod, tmp, plan, base, key)
+    finally:
+        mod.subprocess.run = _real_run
+
+
+def _codex_config_body(mod, tmp, plan, base, key):
 
     with contextlib.redirect_stdout(io.StringIO()):
         mod.configure_codex(base, key, plan)
@@ -355,6 +381,10 @@ def test_postpaid():
     tmp = sandbox(mod)
     mod._REMOTE_CATALOG = None
     mod._POSTPAID_DISCOVERED = None
+    # Windows 上 configure_claude_code → install_claude_tokenhub_launcher_win
+    # 会用真实 npm 前缀(get_npm_prefix_dir)把启动器写进真实全局目录;
+    # 钉为 None 让其回落到沙箱内的 ~/.local/bin(POSIX 无影响)。
+    mod.get_npm_prefix_dir = lambda: None
     plan = mod.PLAN_CATALOG["8"]
     base = "https://tokenhub.tencentmaas.com/v1"
 
@@ -415,34 +445,43 @@ def test_postpaid():
     # 5xx 瞬时错误重试:一次 502 后 200 → 成功;连续 502 → 如实失败
     import urllib.error as _ue, io as _io2
     calls = {"n": 0}
-    def _flaky(req, timeout=None):
-        calls["n"] += 1
-        if calls["n"] == 1:
+    # mod.urllib / mod.time 是真实 stdlib 模块对象:补丁必须恢复,否则
+    # 泄漏到进程内后续所有测试组(此前 interactions 的真实 CDN 请求
+    # 正是被这里泄漏的 _always401"意外拦截"——两个缺陷互相掩盖)。
+    _orig_urlopen = mod.urllib.request.urlopen
+    _orig_sleep = mod.time.sleep
+    try:
+        def _flaky(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _ue.HTTPError(req.full_url, 502, "Bad Gateway", {},
+                                    _io2.BytesIO(b'{"error":{"message":"upstream"}}'))
+            return _io2.BytesIO(b'{"id":"x"}')
+        mod.urllib.request.urlopen = _flaky
+        mod.time.sleep = lambda s: None
+        passed, reason = mod.test_model("https://x", "sk-k", "m1")
+        check("验证重试: 502 后 200 → 成功", passed and calls["n"] == 2)
+        calls["n"] = 0
+        def _always502(req, timeout=None):
+            calls["n"] += 1
             raise _ue.HTTPError(req.full_url, 502, "Bad Gateway", {},
                                 _io2.BytesIO(b'{"error":{"message":"upstream"}}'))
-        return _io2.BytesIO(b'{"id":"x"}')
-    mod.urllib.request.urlopen = _flaky
-    mod.time.sleep = lambda s: None
-    passed, reason = mod.test_model("https://x", "sk-k", "m1")
-    check("验证重试: 502 后 200 → 成功", passed and calls["n"] == 2)
-    calls["n"] = 0
-    def _always502(req, timeout=None):
-        calls["n"] += 1
-        raise _ue.HTTPError(req.full_url, 502, "Bad Gateway", {},
-                            _io2.BytesIO(b'{"error":{"message":"upstream"}}'))
-    mod.urllib.request.urlopen = _always502
-    passed2, reason2 = mod.test_model("https://x", "sk-k", "m1")
-    check("验证重试: 连续 502 → 失败且注明疑似瞬时",
-          not passed2 and "瞬时" in reason2 and calls["n"] == 2)
-    # 4xx 不重试
-    calls["n"] = 0
-    def _always401(req, timeout=None):
-        calls["n"] += 1
-        raise _ue.HTTPError(req.full_url, 401, "Unauthorized", {},
-                            _io2.BytesIO(b'{"error":{"message":"no"}}'))
-    mod.urllib.request.urlopen = _always401
-    passed3, _ = mod.test_model("https://x", "sk-k", "m1")
-    check("验证重试: 401 不重试", not passed3 and calls["n"] == 1)
+        mod.urllib.request.urlopen = _always502
+        passed2, reason2 = mod.test_model("https://x", "sk-k", "m1")
+        check("验证重试: 连续 502 → 失败且注明疑似瞬时",
+              not passed2 and "瞬时" in reason2 and calls["n"] == 2)
+        # 4xx 不重试
+        calls["n"] = 0
+        def _always401(req, timeout=None):
+            calls["n"] += 1
+            raise _ue.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                _io2.BytesIO(b'{"error":{"message":"no"}}'))
+        mod.urllib.request.urlopen = _always401
+        passed3, _ = mod.test_model("https://x", "sk-k", "m1")
+        check("验证重试: 401 不重试", not passed3 and calls["n"] == 1)
+    finally:
+        mod.urllib.request.urlopen = _orig_urlopen
+        mod.time.sleep = _orig_sleep
 
     # 交互选择:编号挑选
     mod._POSTPAID_SELECTED = None
@@ -840,6 +879,13 @@ def test_main_interactions():
         # 远程脚本安装走本地桩:交互测试不触网(真实路径由 remote-script 组覆盖)。
         # 远程脚本在非交互下本来就 fail-closed,桩只是省掉真实下载。
         mod.run_remote_script = lambda url, sargs, name: False
+        # 安装也一律走桩:干净机器(如 CI)上 12 工具会被真实 npm install -g
+        # (实测 8 条真实网络命令);本机"已装短路"只是偶然,不能当隔离。
+        # is_tool_installed=False + install_tool=True 保持"全部配置"语义不变。
+        mod.is_tool_installed = lambda t: False
+        mod.install_tool = lambda t: True
+        # 远程目录刷新同样不触网(单独跑本组时会真实 GET cdn.jsdelivr.net)
+        mod.refresh_remote_catalog = lambda: None
         # 宿主机可能残留 TOKENPLAN_API_KEY(真实运行写入),不清理会改变交互顺序
         os.environ.pop("TOKENPLAN_API_KEY", None)
         buf = io.StringIO()
@@ -1832,6 +1878,11 @@ TEST_GROUPS = [
 def main():
     pattern = sys.argv[1] if len(sys.argv) > 1 else ""
     groups = [(n, f) for n, f in TEST_GROUPS if pattern in n]
+    if not groups:
+        # 模式落空 = 静默假绿(实测曾以"通过 0/0 ✅全部通过" exit 0 结束),
+        # 必须显式失败,防止 CI 里的 typo 让整套回归无声消失。
+        print(f"未找到匹配 {pattern!r} 的测试组(共 {len(TEST_GROUPS)} 组)")
+        sys.exit(2)
     for name, fn in groups:
         print(f"\n── {name} ──")
         fn()

@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+### 测试套件加固(2026-09-04 测试架构审查,全部实测复现后修复)
+
+- **P0:interactions 组补齐安装桩**——此前未 stub
+  `is_tool_installed`/`install_tool`/`refresh_remote_catalog`,干净机器
+  (CI)上实测触发 8 条真实 `npm install -g` 网络命令;单独跑该组还会
+  真实请求 cdn.jsdelivr.net。现桩为"未安装+安装成功",语义不变,
+  单独跑 0.8s 无网络
+- **P0:postpaid 组 stdlib 补丁恢复**——改写的是真实
+  `urllib.request.urlopen`/`time.sleep` 且不恢复,泄漏至整个进程;
+  此前 interactions 的 CDN 请求正是被泄漏的 `_always401` 意外拦截,
+  两个缺陷互相掩盖、行为依赖组顺序。现 try/finally 恢复
+- P1:standalone 运行器零匹配模式此前以"通过 0/0 ✅全部通过"exit 0
+  结束(实测),模式 typo 会让整套回归无声消失;现显式报错 exit 2
+- P1:Windows 真实系统副作用消除——codex 组 stub subprocess(消除真实
+  `reg query`+`setx` 写注册表),postpaid 组钉 `get_npm_prefix_dir()=None`
+  (消除启动器写进真实 npm 全局目录)
+- P1:删除对包内已不存在的 `PLUGIN_EXTENSION_IDS` 的恒真断言(293→292,
+  未来若真加 plugin 工具会变 AttributeError 而非通过)
+- P1:`load_module(windows=True)` 的字面量替换加命中断言——源码重排
+  导致替换落空时在加载点立即报错,而不是让 Windows 语义组在 POSIX
+  语义下假绿(registry-windows 组断言两侧皆真,兜不住)
+- 顺序无关性验证:全量逆序执行通过;pytest 138→143(安全回归 5 项)
+
 ### 安全加固(2026-09-04 全量代码审计:架构/依赖/循环引用/安全/规范/注释/测试)
 
 - `state.json` 台账落盘后收紧为 0600:其中 setx_keys 记录被覆盖前的旧

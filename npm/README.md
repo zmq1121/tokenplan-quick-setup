@@ -1,4 +1,4 @@
-# 腾讯云 Token Plan 一键接入
+# 腾讯云 TokenHub 一键接入
 
 将腾讯云大模型 API 的接入配置(服务端点、API Key、模型列表)自动写入 12 个 AI 编程工具,运行一次即可完成安装与配置。
 
@@ -80,7 +80,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 编号 1-6 为已验证工具,顺序固定。未列出的工具(如 Cursor、TRAE、Kilo、Cline 等)不提供自动配置,也不在本工具的支持范围内。
 
-### 真 Key 验证口径(v2.2.0,2026-09 实测)
+### 真 Key 验证口径(2026-09 实测,持续更新)
 
 | 产品线 | 协议端点 | 工具端到端(真实对话) |
 |--------|:---:|:---:|
@@ -88,7 +88,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
 | 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
 | 国际版(tencentcloudmaas) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code ✓ |
-| 国际站后付费(/v1) | 端点结构与中国站一致(models/chat/responses/messages/embeddings,已探活) | 模型层待验证(需国际站后付费 Key;两站 Key 不互通) |
+| 国际站后付费(/v1) | chat ✓ / responses ✓ / anthropic ✓(2026-09-03 真 Key 三协议实测) | 44 模型发现 ✓ / 聊天过滤 26 个 ✓ / Claude 槽位 ✓ / Codex(responses) ✓ |
 
 ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。
 
@@ -97,7 +97,7 @@ ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户
 1. **个人版(lkeap)**:无 Responses 端点,官方文档要求 `wire_api = "chat"`,但 Codex 0.152+ 已移除 chat 模式([openai/codex#7782](https://github.com/openai/codex/discussions/7782))。安装器按官方文档写 `chat` 并警告;个人版用户如遇报错需降级 Codex 版本。
 2. **国际站**:`auto` 路由模型不支持 Responses 协议(网关 400005;CN 域支持)。Codex 在国际站自动改用首个具体模型(专业版 glm-5.3 / 个人版 deepseek-v4-flash-202605,真 Key 实测通过)。
 
-Windows 平台差异:Hermes Agent 无官方安装器,安装器会提示手动安装后重跑 `repair`;CodeBuddy 的 API Key 通过 `setx` 写入用户环境变量,需重新打开终端生效;`claude-tokenplan` 选择器以 `.cmd` 文件写入 npm 全局目录。
+Windows 平台差异:Hermes Agent 无官方安装器,安装器会提示手动安装后重跑 `repair`;CodeBuddy 的 API Key 通过 `setx` 写入用户环境变量,需重新打开终端生效;`claude-tokenhub` 选择器以 `.cmd` 文件写入 npm 全局目录。
 
 ## 子命令
 
@@ -140,14 +140,14 @@ bash setup.command doctor --deep --plan enterprise-pro --api-key <KEY>
 
 ## Claude Code
 
-`/model` 菜单仅支持 Claude Code 的固定槽位,使用 Token Plan 模型的两种方式:
+`/model` 菜单仅支持 Claude Code 的固定槽位,使用 TokenHub 模型的两种方式:
 
 ```bash
 claude --model glm-5.2     # 直接指定模型 ID
-claude-tokenplan           # 列出当前套餐全部模型,选择后启动
+claude-tokenhub           # 列出当前套餐全部模型,选择后启动
 ```
 
-完整模型目录写入 `~/.claude/tokenplan-models.json`。
+完整模型目录写入 `~/.claude/tokenhub-models.json`。
 
 模型与思考强度为两个独立设置,需分两次输入,拼接在一起会返回 403:
 
@@ -160,7 +160,7 @@ claude-tokenplan           # 列出当前套餐全部模型,选择后启动
 
 ## 其它工具备注
 
-- **OpenClaw**:写入 `~/.openclaw/openclaw.json` 与 `.env`,使用 `tencent-tokenplan` Provider,同时写入 models allowlist 以避免内置模型列表遮挡套餐模型。验证命令:`openclaw models list --provider tencent-tokenplan`
+- **OpenClaw**:写入 `~/.openclaw/openclaw.json` 与 `.env`,使用 `tokenhub` Provider,同时写入 models allowlist 以避免内置模型列表遮挡套餐模型。验证命令:`openclaw models list --provider tokenhub`
 - **OpenCode**:写入 `~/.config/opencode/opencode.json`,使用 `tokenplan` Provider,按 OpenAI 兼容端点生成
 - **DeepSeek Harness**:通过本机 `dsh` CLI 接入,启动命令 `dsh web`。如报 `cordis.patch.yml must be a top-level YAML array`,删除该文件或重置为空数组:
   ```bash

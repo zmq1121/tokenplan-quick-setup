@@ -80,7 +80,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 编号 1-6 为已验证工具,顺序固定。未列出的工具(如 Cursor、TRAE、Kilo、Cline 等)不提供自动配置,也不在本工具的支持范围内。
 
-### 真 Key 验证口径(v2.2.0,2026-09 实测)
+### 真 Key 验证口径(2026-09 实测,持续更新)
 
 | 产品线 | 协议端点 | 工具端到端(真实对话) |
 |--------|:---:|:---:|
@@ -88,7 +88,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
 | 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
 | 国际版(tencentcloudmaas) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code ✓ |
-| 国际站后付费(/v1) | 端点结构与中国站一致(models/chat/responses/messages/embeddings,已探活) | 模型层待验证(需国际站后付费 Key;两站 Key 不互通) |
+| 国际站后付费(/v1) | chat ✓ / responses ✓ / anthropic ✓(2026-09-03 真 Key 三协议实测) | 44 模型发现 ✓ / 聊天过滤 26 个 ✓ / Claude 槽位 ✓ / Codex(responses) ✓ |
 
 ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。
 

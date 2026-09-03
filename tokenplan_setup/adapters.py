@@ -702,16 +702,37 @@ def _catalog_display(catalog: Dict[str, object]) -> Tuple[str, ...]:
     return tuple(line for line in display if isinstance(line, str))
 
 
+# 模型 ID 的合法字符集:字母/数字/点/横线/斜线(现有全部目录 ID 都在此集内,
+# 含 deepseek/deepseek-v4-flash-vision-exp 这类厂商前缀形式)。ID 会被插值
+# 进 .cmd 启动器、TOML 表头与 sh 脚本,出现在集合外的字符一律丢弃——
+# 这是对"远程目录/发现 API 内容被污染"的纵深防御,而非对正常数据的约束。
+_SAFE_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
 def get_model_ids(plan_key: str) -> List[str]:
-    """Return the canonical model IDs shared by every tool adapter."""
+    """Return the canonical model IDs shared by every tool adapter.
+
+    Charset-validated: anything outside [A-Za-z0-9._/-] is dropped with a
+    warning so a poisoned catalog or discovery response cannot inject
+    shell/TOML/batch metacharacters into generated launchers and configs.
+    """
     catalog = get_model_catalog(plan_key)
     result: List[str] = []
+    rejected: List[str] = []
     for line in _catalog_display(catalog):
         if ":" not in line:
             continue
         model_id = line.split(":", 1)[1].strip().split(" ", 1)[0]
-        if model_id and model_id not in result:
+        if not model_id:
+            continue
+        if not _SAFE_MODEL_ID_RE.match(model_id):
+            if model_id not in rejected:
+                rejected.append(model_id)
+            continue
+        if model_id not in result:
             result.append(model_id)
+    if rejected:
+        warn(f"已忽略含异常字符的模型 ID: {', '.join(rejected)}")
     return result
 
 

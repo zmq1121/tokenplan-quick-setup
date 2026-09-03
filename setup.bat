@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
-title 腾讯云 Token Plan 一键接入
+title 腾讯云 TokenHub 一键接入
 
 echo.
 echo   ╔══════════════════════════════════════════════╗
-echo   ║   腾讯云 Token Plan — 一键接入              ║
+echo   ║   腾讯云 TokenHub — 一键接入                 ║
 echo   ╚══════════════════════════════════════════════╝
 echo.
 
@@ -41,7 +41,7 @@ REM ── 2. 下载主脚本（固定版本镜像，多源回退） ───�
 REM SETUP_VERSION / SETUP_SHA256 由 scripts/build_dist.py 自动注入,
 REM 手动修改无效——修改 setup.command 后必须重新运行同步脚本。
 set "SETUP_VERSION=2.7.6"
-set "SETUP_SHA256=923f9113f222a4b98bd652d0424f091934bb0d1c895e0c683d289e28704e5e53"
+set "SETUP_SHA256=c9138e704790f25b1b79e9a7c78ff9881c73a92e35bf7fcbfc56dd7898bd253c"
 
 set "TMPFILE=%TEMP%\tokenplan-setup.py"
 

@@ -177,6 +177,18 @@ def mask_secret(secret: str, visible: int = 4) -> str:
     return f"{secret[:visible]}…"
 
 
+# API Key 入口字符集:真实腾讯云 Key 为字母/数字/连字符。含 shell/TOML/
+# 批处理元字符(引号、反斜杠、$、`、;、|、括号、空白、% 等)的输入一律
+# 拒绝——env 文件是全链路唯一不做格式转义的密钥落盘点,入口拒绝比下游
+# 转义更不容易随各工具格式演进而失效(改格式需重跑各工具 E2E)。
+_UNSAFE_KEY_CHARS_RE = re.compile(r"""[\s"'\\$`;&|<>()\[\]{}#%^!*?]""")
+
+
+def key_charset_safe(api_key: str) -> bool:
+    """True when the key holds no metacharacter dangerous in any config sink."""
+    return not _UNSAFE_KEY_CHARS_RE.search(api_key)
+
+
 class Spinner:
     """Terminal spinner with tty detection and CJK-safe line erasing."""
 
@@ -273,11 +285,16 @@ def load_state() -> Dict[str, list]:
 
 
 def save_state(state: Dict[str, list]) -> None:
-    """Persist the side-effect ledger to state.json."""
+    """Persist the side-effect ledger to state.json.
+
+    台账里的 setx_keys 会记录被覆盖前的旧环境变量值——那往往是一把
+    真实密钥。落盘后立即收紧为仅属主可读写,与备份/配置文件同一标准。
+    """
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(
         json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     )
+    _harden(STATE_PATH)
 
 
 def record_state(kind: str, value: object) -> None:
@@ -405,10 +422,28 @@ def write_env(
     _harden(path)
 
 
+def _child_env_for_install() -> Dict[str, str]:
+    """Child-process env for install commands with credential vars stripped.
+
+    安装命令(npm install / 第三方 install.sh)从不需要 API Key;主循环
+    "逐工具先安装后配置"意味着前面工具配置时写入 os.environ 的密钥会被
+    后面工具的安装脚本原样继承。这里在 spawn 边界剔除所有 Key 形态的
+    变量,阻断跨工具泄漏(PATH 等安装所需变量原样保留)。
+    """
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if "API_KEY" not in name.upper()
+        and "AUTH_TOKEN" not in name.upper()
+        and "SECRET" not in name.upper()
+    }
+
+
 def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
     """Run an install command, streaming output; returns success."""
     print(f"  {CYAN}→{RESET} {message}")
     print()
+    child_env = _child_env_for_install()
     # Windows: npm/code etc. are .cmd shims that CreateProcess cannot launch
     # directly without a shell; resolve and reroute through the string branch.
     if isinstance(command, tuple) and IS_WINDOWS:
@@ -423,6 +458,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         elif IS_WINDOWS:
             proc = subprocess.Popen(
@@ -432,6 +468,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         else:
             proc = subprocess.Popen(
@@ -442,6 +479,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         assert proc.stdout is not None
         # 看门狗:到点 kill 进程,让阻塞中的 readline 以 EOF 退出。

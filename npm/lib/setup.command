@@ -180,6 +180,18 @@ def mask_secret(secret: str, visible: int = 4) -> str:
     return f"{secret[:visible]}…"
 
 
+# API Key 入口字符集:真实腾讯云 Key 为字母/数字/连字符。含 shell/TOML/
+# 批处理元字符(引号、反斜杠、$、`、;、|、括号、空白、% 等)的输入一律
+# 拒绝——env 文件是全链路唯一不做格式转义的密钥落盘点,入口拒绝比下游
+# 转义更不容易随各工具格式演进而失效(改格式需重跑各工具 E2E)。
+_UNSAFE_KEY_CHARS_RE = re.compile(r"""[\s"'\\$`;&|<>()\[\]{}#%^!*?]""")
+
+
+def key_charset_safe(api_key: str) -> bool:
+    """True when the key holds no metacharacter dangerous in any config sink."""
+    return not _UNSAFE_KEY_CHARS_RE.search(api_key)
+
+
 class Spinner:
     """Terminal spinner with tty detection and CJK-safe line erasing."""
 
@@ -276,11 +288,16 @@ def load_state() -> Dict[str, list]:
 
 
 def save_state(state: Dict[str, list]) -> None:
-    """Persist the side-effect ledger to state.json."""
+    """Persist the side-effect ledger to state.json.
+
+    台账里的 setx_keys 会记录被覆盖前的旧环境变量值——那往往是一把
+    真实密钥。落盘后立即收紧为仅属主可读写,与备份/配置文件同一标准。
+    """
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(
         json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     )
+    _harden(STATE_PATH)
 
 
 def record_state(kind: str, value: object) -> None:
@@ -408,10 +425,28 @@ def write_env(
     _harden(path)
 
 
+def _child_env_for_install() -> Dict[str, str]:
+    """Child-process env for install commands with credential vars stripped.
+
+    安装命令(npm install / 第三方 install.sh)从不需要 API Key;主循环
+    "逐工具先安装后配置"意味着前面工具配置时写入 os.environ 的密钥会被
+    后面工具的安装脚本原样继承。这里在 spawn 边界剔除所有 Key 形态的
+    变量,阻断跨工具泄漏(PATH 等安装所需变量原样保留)。
+    """
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if "API_KEY" not in name.upper()
+        and "AUTH_TOKEN" not in name.upper()
+        and "SECRET" not in name.upper()
+    }
+
+
 def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
     """Run an install command, streaming output; returns success."""
     print(f"  {CYAN}→{RESET} {message}")
     print()
+    child_env = _child_env_for_install()
     # Windows: npm/code etc. are .cmd shims that CreateProcess cannot launch
     # directly without a shell; resolve and reroute through the string branch.
     if isinstance(command, tuple) and IS_WINDOWS:
@@ -426,6 +461,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         elif IS_WINDOWS:
             proc = subprocess.Popen(
@@ -435,6 +471,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         else:
             proc = subprocess.Popen(
@@ -445,6 +482,7 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=child_env,
             )
         assert proc.stdout is not None
         # 看门狗:到点 kill 进程,让阻塞中的 readline 以 EOF 退出。
@@ -1946,16 +1984,37 @@ def _catalog_display(catalog: Dict[str, object]) -> Tuple[str, ...]:
     return tuple(line for line in display if isinstance(line, str))
 
 
+# 模型 ID 的合法字符集:字母/数字/点/横线/斜线(现有全部目录 ID 都在此集内,
+# 含 deepseek/deepseek-v4-flash-vision-exp 这类厂商前缀形式)。ID 会被插值
+# 进 .cmd 启动器、TOML 表头与 sh 脚本,出现在集合外的字符一律丢弃——
+# 这是对"远程目录/发现 API 内容被污染"的纵深防御,而非对正常数据的约束。
+_SAFE_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
 def get_model_ids(plan_key: str) -> List[str]:
-    """Return the canonical model IDs shared by every tool adapter."""
+    """Return the canonical model IDs shared by every tool adapter.
+
+    Charset-validated: anything outside [A-Za-z0-9._/-] is dropped with a
+    warning so a poisoned catalog or discovery response cannot inject
+    shell/TOML/batch metacharacters into generated launchers and configs.
+    """
     catalog = get_model_catalog(plan_key)
     result: List[str] = []
+    rejected: List[str] = []
     for line in _catalog_display(catalog):
         if ":" not in line:
             continue
         model_id = line.split(":", 1)[1].strip().split(" ", 1)[0]
-        if model_id and model_id not in result:
+        if not model_id:
+            continue
+        if not _SAFE_MODEL_ID_RE.match(model_id):
+            if model_id not in rejected:
+                rejected.append(model_id)
+            continue
+        if model_id not in result:
             result.append(model_id)
+    if rejected:
+        warn(f"已忽略含异常字符的模型 ID: {', '.join(rejected)}")
     return result
 
 
@@ -3024,6 +3083,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 
+
 def choose_plan() -> PlanSpec:
     """Interactive plan selection (第一步); EOF without --plan is an error."""
     total = len(PLAN_CATALOG)
@@ -3762,6 +3822,12 @@ def _run_setup_flow(args: argparse.Namespace) -> Tuple[int, Dict[str, object]]:
             print()
             api_key = ""
             continue
+    if not key_charset_safe(api_key):
+        # 入口拒绝:env 文件等落盘点不做格式转义,含元字符的"Key"可能是
+        # 粘贴错误或注入尝试;真实腾讯云 Key 只含字母/数字/连字符
+        print(f"\n  {YELLOW}❌ API Key 含引号/空白/特殊符号，已拒绝。{RESET}")
+        print(f"  {YELLOW}   腾讯云 Key 仅包含字母、数字与连字符；请检查是否粘贴了错误内容。{RESET}")
+        return EXIT_USER_CANCEL, result
     result["api_key"] = mask_secret(api_key)
     print()
 

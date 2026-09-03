@@ -48,3 +48,18 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[P
     yield tmp_path
 
     assert os.environ.get("HOME") == str(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _reset_adapter_process_globals(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """adapters 的模块级缓存(远程目录/后付费发现结果)在每条用例前重置。
+
+    这些是进程级可变状态:某条用例填充后若不清理,后续用例会读到残留值,
+    测试结果将依赖执行顺序。monkeypatch 在用例结束后自动恢复原值,
+    显式声明的用例(如真实网络发现)不受影响——它们在本条 fixture 之后运行。
+    """
+    monkeypatch.setattr(adapters, "_REMOTE_CATALOG", None)
+    monkeypatch.setattr(adapters, "_REMOTE_LATEST_VERSION", None)
+    monkeypatch.setattr(adapters, "_POSTPAID_DISCOVERED", None)
+    monkeypatch.setattr(adapters, "_POSTPAID_SELECTED", None)
+    yield

@@ -66,6 +66,7 @@ from tokenplan_setup.infrastructure import (
     dim,
     display_width,
     info,
+    key_charset_safe,
     load_state,
     mask_secret,
     ok,
@@ -813,6 +814,12 @@ def _run_setup_flow(args: argparse.Namespace) -> Tuple[int, Dict[str, object]]:
             print()
             api_key = ""
             continue
+    if not key_charset_safe(api_key):
+        # 入口拒绝:env 文件等落盘点不做格式转义,含元字符的"Key"可能是
+        # 粘贴错误或注入尝试;真实腾讯云 Key 只含字母/数字/连字符
+        print(f"\n  {YELLOW}❌ API Key 含引号/空白/特殊符号，已拒绝。{RESET}")
+        print(f"  {YELLOW}   腾讯云 Key 仅包含字母、数字与连字符；请检查是否粘贴了错误内容。{RESET}")
+        return EXIT_USER_CANCEL, result
     result["api_key"] = mask_secret(api_key)
     print()
 

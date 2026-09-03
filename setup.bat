@@ -40,8 +40,8 @@ echo.
 REM ── 2. 下载主脚本（固定版本镜像，多源回退） ────────────────────
 REM SETUP_VERSION / SETUP_SHA256 由 scripts/build_dist.py 自动注入,
 REM 手动修改无效——修改 setup.command 后必须重新运行同步脚本。
-set "SETUP_VERSION=2.7.1"
-set "SETUP_SHA256=fd5a7c32df7f213fce33d4b5838c110bffa90cb72496c8eff5d31d31637b32ea"
+set "SETUP_VERSION=2.7.2"
+set "SETUP_SHA256=dafa5a0090cbe7fee15d74c1326000b6e5df4321622e98355bc96f3c3fe5b65d"
 
 set "TMPFILE=%TEMP%\tokenplan-setup.py"
 

@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-09-03
+
+### 修复
+
+- Windows CI: `python -m pytest` 步骤补齐 `PYTHONIOENCODING=utf-8` 与
+  `PYTHONUTF8=1`。此前仅 `run_tests.py` 步骤设置了 UTF-8，导致 pytest
+  参数化执行旧回归组时部分中文输出触发 `cp1252` 编码异常，连带引发
+  JSONDecodeError 与 `--version` 假失败
+
 ## [2.7.1] - 2026-09-03
 
 ### 修复

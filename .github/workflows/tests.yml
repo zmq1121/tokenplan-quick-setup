@@ -35,6 +35,9 @@ jobs:
           PYTHONUTF8: "1"
       - name: Run unified pytest suite with coverage
         run: python -m pytest --cov=tokenplan_setup --cov-report=term-missing
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
       - name: Ruff
         run: python -m ruff check .
       - name: Mypy

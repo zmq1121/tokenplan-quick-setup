@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 
 # ── 品牌口径(集中定义;所有工具配置里用户可见的名称由此派生) ──────────────
 # 接入平台是腾讯云 TokenHub(端点域名/控制台口径)。2.5.x 及之前曾以

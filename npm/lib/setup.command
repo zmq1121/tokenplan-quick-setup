@@ -702,7 +702,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         display_name="个人版 - Hy（混元）",
         base_url="https://api.lkeap.cloud.tencent.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key",
-        only_note="该套餐仅支持 Hy3 模型",
+        only_note="该套餐仅支持混元 Hy 系列模型: Hy3、Hy4-preview",
     ),
     "3": PlanSpec(
         choice="3",

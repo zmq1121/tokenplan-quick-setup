@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tokenplan_setup import adapters, domain
+from tokenplan_setup import adapters, domain, flows
 
 # 一次覆盖 TOML 语义所有 corner case: 双引号触发字符串终结、反斜杠触发转义、
 # 换行/回车/制表符会被 TOML basic string 拒绝、井号可能被误解成注释、方括号
@@ -49,7 +49,11 @@ def test_grok_config_survives_a_hostile_api_key(
         tomllib = None
     if tomllib is not None:
         parsed = tomllib.loads(text)
-        recovered = parsed["model"]["glm-5"]["api_key"]  # first plan model
+        # 断言跟随套餐首个模型:目录随官方上/下线变化,写死 ID 会像
+        # 'glm-5'(personal-hy 从未有过的模型)一样在 CI 的 tomllib
+        # 分支上炸出 KeyError,而本地 <=3.10 无 tomllib 时永远测不到。
+        first_model = flows.get_model_ids(plan.key)[0]
+        recovered = parsed["model"][first_model]["api_key"]  # first plan model
     else:
         # 3.9/3.10 无 tomllib:退回严格的字符串包含检查,验证 raw 换行/制表符
         # 都以转义序列出现,没有以字面字符出现。

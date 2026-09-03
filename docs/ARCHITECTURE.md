@@ -2,8 +2,9 @@
 
 本文面向维护者,讲清楚 tokenplan-quick-setup 的整体实现:入口链路、核心数据结构、两条流水线(安装/配置)、安全机制、测试与发布体系。面向使用者的操作指引见 [USER-GUIDE.md](USER-GUIDE.md)。
 
-- 主脚本:`setup.command`(bash/Python 多态单文件,约 3300 行,零第三方依赖)
-- 当前版本:2.6.0(npm `tokenplan-setup@2.6.0`)
+- 维护源码:`tokenplan_setup/`(按基础设施、领域、适配器、流程、CLI 分层)
+- 发布产物:`setup.command`(由 `scripts/build_dist.py` 确定性生成的 bash/Python 多态单文件,零第三方运行时依赖)
+- 当前版本:2.7.0(npm `tokenplan-setup@2.7.0`)
 
 ---
 
@@ -25,7 +26,7 @@
 
 ### 2.1 `bash setup.command`(macOS/Linux)
 
-多态脚本技巧:第 2 行 `"exec" "python3" "$0" "$@"` 让 bash 把自己重新交给 python3 执行,之后就是纯 Python。
+多态脚本技巧:第 2 行 `"exec" "$(command -v python3 || command -v python)" "$0" "$@"` 让 bash 把自己重新交给 Python 执行,之后就是纯 Python;`python3` 缺失时回退到 `python`。
 
 ### 2.2 `npx tokenplan-setup`(跨平台)
 
@@ -45,7 +46,25 @@ npx → npm/bin/tokenplan-setup.js(零依赖 Node 包装器)
   → 校验通过才执行,透传参数,退出码回显
 ```
 
-`SETUP_VERSION` / `SETUP_SHA256` 由 `scripts/sync_npm_lib.py` 自动注入,手改无效——发布流程保证"批处理文件、npm 包、GitHub Release 三处的 setup.command 是同一份字节"。
+`SETUP_VERSION` / `SETUP_SHA256` 由 `scripts/build_dist.py` 自动注入,手改无效——发布流程保证"批处理文件、npm 包、GitHub Release 三处的 setup.command 是同一份字节"。
+
+因此 `setup.command` 一旦变更就必须同步升版本:`setup.bat` 内嵌的是新字节的
+SHA256,而下载地址指向 `v{SETUP_VERSION}` 的 Release。若沿用旧版本号,Windows
+用户会下到旧产物并在完整性校验处直接中止。
+
+### 2.4 Python 模块入口
+
+`python -m tokenplan_setup` 经 `__main__.py → entrypoint.py → cli.main`,
+直接运行导入的包模块。`_runtime.py` **不参与生产执行**,只为构建脚本和旧回归
+套件提供源码拼装能力——否则包会被执行两遍,产生两套互不相通的模块级状态,
+让测试断言的对象和实际运行的对象分离。`test_entrypoints.py` 有一条守卫用例
+断言普通 `import tokenplan_setup` 不会加载 `_runtime`,防止这种结构被重新引入。
+
+静态依赖方向为 `infrastructure → domain → adapters → flows → cli`(箭头表示
+构建/依赖顺序,后层只能依赖前层);import-linter 同时禁止 `_runtime` 静态反向
+导入业务层,避免拼装层形成循环。跨模块可变状态一律通过 `adapters` 的访问函数
+(如 `remote_catalog_size()`、`postpaid_discovered_count()`)读取,而不是导入
+全局变量本身——后者在包语义下只会绑定导入时的快照。
 
 ---
 
@@ -58,9 +77,10 @@ npx → npm/bin/tokenplan-setup.js(零依赖 Node 包装器)
 | `BACKEND_REGISTRY` | backend → 适配器 | 两类:`cli`(可自动安装)/ `desktop`(手动下载) |
 | `MODEL_CATALOG` | 套餐 key → {default, display} | 内置模型目录(远程目录的离线兜底) |
 | `CLAUDE_MODEL_SLOTS` | 套餐 key → opus/sonnet/haiku | Claude Code 固定槽位映射(与 OpenAI 兼容目录分离) |
-| `CONFIGURATOR_REGISTRY` | 工具 key → 配置函数 | 10 个自动配置器 |
+| `CONFIGURATOR_REGISTRY` | 工具 key → 配置函数 | 12 个自动配置器(含 WorkBuddy/ZCode 桌面类) |
 | `CONFIG_SIGNATURES` | 工具 key → (文件, 当前特征, 旧版特征) | doctor 反向探测"我们的配置块还在不在";旧版特征兼容 2.5.x 品牌配置不误报 |
-| `TOOL_DEPENDENCY_REGISTRY` | 工具 key → 依赖 | 目前仅 dsh 需要 npx |
+| `TOOL_DEPENDENCY_REGISTRY` | 工具 key → 额外运行依赖 | 目前仅 dsh 额外需要 npx |
+| `SYSTEM_DEPENDENCY_REGISTRY` | 系统命令 → 平台/用途/可选性 | Python、Node/npm/npx、bash、curl、certutil、pgrep、setx、reg 的统一口径,供 doctor/文档/测试使用 |
 
 ### 套餐与端点矩阵(9 个)
 
@@ -101,7 +121,19 @@ run_command()     流式输出 + 600s 看门狗强杀;Windows 上 .cmd shim 先
 | OpenClaw | 远程脚本(macOS/Linux)+ npm(Windows) | |
 | WorkBuddy / ZCode | 手动下载 | 桌面应用,但配置照写,装好即用 |
 
-`--ignore-scripts` 与"先下载后确认"是 2.5.0 的供应链加固:lifecycle 脚本是 npm 生态供应链攻击的重点面,而这些 CLI 均通过平台包分发二进制、不需要安装期脚本。
+`--ignore-scripts` 与"先下载后确认"是 2.5.0 的供应链加固:lifecycle 脚本是 npm 生态供应链攻击的重点面,而这些 CLI 均通过平台包分发二进制、不需要安装期脚本。2.6.1 起 npm 包名与精确版本只由 `VERIFIED_TOOL_VERSIONS` 提供,安装命令不再跟随裸包或 `@latest`;清单同时记录查询所用 dist-tag、稳定性状态与 registry integrity。
+
+需要明确边界:精确版本 pin 能防住"跟随 `@latest` 漂移",但防不住同一版本号下
+tarball 被重新发布。`scripts/check_tool_versions.py` 就是为这个缺口设的门禁——它
+直接查 npm registry 的精简 packument,逐包比对 `dist.integrity`,不一致即退出码 1;
+每周由 `supply-chain-pins` job 执行,且**故意不设 `continue-on-error`**:偶发的网络
+误报可以接受,静默的供应链漂移不行。脚本区分三种结果(0 一致 / 1 确定不一致 /
+2 网络异常导致无法证明),避免把"不可用"误报成"不一致"。
+
+仍未实现的是**安装期**强制校验:`npm install` 路径不比对 integrity,真要 enforce
+需要引入 lockfile 或安装前查询。也就是说当前防护是"周期性检测",不是"实时阻断"。
+
+DeepSeek Harness 是唯一例外:截至 2026-09-03 registry 中全部 15 个版本均为 alpha/RC,不存在可选的稳定版本。安装器固定查询时的 `latest` (`0.1.1-rc.2`)并标为 `prerelease-only`,不将其误称为稳定版。
 
 ---
 
@@ -115,12 +147,12 @@ get_model_ids(plan)
   │                + _POSTPAID_EXCLUDE 正则过滤非聊天模型(视频/图像/embedding/…)
   │                + 用户交互选择子集(--models 或编号选择)
   └─ 套餐类 → refresh_remote_catalog():
-        jsDelivr 拉 models.json + models.json.sha256
+        jsDelivr 从 @v{VERSION} 拉 models.json + models.json.sha256
         哈希一致 → 采用远程目录
         拿不到哈希 / 哈希不匹配 → 回退内置 MODEL_CATALOG(fail-closed)
 ```
 
-- 远程目录让"模型增减"只需提交一次 JSON,旧安装文件下次运行自动拿到新列表
+- 远程目录与安装器版本绑定,同一发布版本始终读取同一份 JSON;模型增减随新版本标签发布
 - `latest_version` 字段用于向旧版本安装文件提示升级
 - `scripts/check_models.py` 可将目录与官方文档对照(维护者工具)
 - `models.json` 与 `.sha256` 在 `.gitattributes` 中锁定 `eol=lf`(字节级完整性契约,详见 §11)
@@ -219,9 +251,9 @@ get_model_ids(plan)
 
 | 机制 | 实现 |
 |---|---|
-| 远程脚本执行 | `run_remote_script()`:完整下载到临时文件 → 展示来源 URL + SHA256 + 大小 → 交互确认 → `bash <tmpfile>` 执行;非交互环境一律拒绝;`--yes` 跳过确认但指纹仍打印。取代 `curl \| bash` 盲管道 |
+| 远程脚本执行 | Hermes/OpenClaw 上游没有发布可预先固定的官方摘要,不能进行下载前摘要验证。`run_remote_script()`:完整下载到临时文件 → 展示本次内容的来源 URL + SHA256 + 大小 → 交互确认 → `bash <tmpfile>` 执行;非交互环境一律拒绝;`--yes` 跳过确认但指纹仍打印。取代 `curl \| bash` 盲管道 |
 | 目录完整性 | `models.json.sha256` 哈希校验,不匹配/拿不到 → 回退内置(fail-closed) |
-| 供应链 | npm 统一 `--ignore-scripts`;setup.bat 下载固定版本 + certutil SHA256 |
+| 供应链 | npm 使用已验证清单的精确版本并统一 `--ignore-scripts`;setup.bat 下载固定版本 + certutil SHA256 |
 | 密钥卫生 | 终端与 JSON 输出全部 `mask_secret()`(前 4 位 + …);配置文件 0600;env 间接引用优先 |
 | 可逆性 | 备份 + manifest.jsonl + state.json 台账(见 §8) |
 | HTTP 收敛 | `_http_request()`:统一超时/User-Agent/认证头;HTTPError → `(code, body)`,传输错误 → RuntimeError(调用方决定提示口径) |
@@ -230,7 +262,7 @@ get_model_ids(plan)
 
 ## 8. 卸载与还原(`uninstall`)
 
-台账 `~/.tokenplan-backups/state.json` 记录四类副作用:
+台账 `~/.tokenplan-backups/state.json` 记录副作用:
 
 | 类别 | 还原动作 |
 |---|---|
@@ -238,8 +270,15 @@ get_model_ids(plan)
 | `files_written` / `env_files` | 删除生成的文件(启动器/env 文件等) |
 | `setx_keys` | `setx` 还原旧值,无旧值则 `reg delete` |
 | manifest.jsonl | `collect_latest_backups()` 按原路径取最新备份,`copy2` 还原 |
+| `remote_scripts` | **不可回滚**,仅登记并披露(见下) |
 
 不卸载工具本体(npm 包、CLI 程序保留),只还原配置与安装器写入的修改。备份目录保留供人工确认后删除。
+
+`remote_scripts` 是审计条目而非还原条目:第三方安装脚本以当前用户身份执行,
+其副作用(装了什么、写到哪)不在本工具掌握范围内,声称能回滚就是不诚实。因此
+`run_remote_script()` 在执行前登记 `{tool, url, sha256, bytes}`,`uninstall` 在
+两条返回路径上都会列出这些记录并明确说明无法自动清理,`--json` 输出同样带
+`remote_scripts` 字段,保证契约形状稳定。
 
 ---
 
@@ -254,9 +293,14 @@ get_model_ids(plan)
 
 ## 10. 测试体系
 
-`tests/run_tests.py`:**229 项断言,零依赖,单命令运行**。
+`tests/run_tests.py`:**293 项断言,零依赖,单命令运行**。该计数是旧回归
+套件的断言数,不是对真实云端端到端调用的承诺。
 
-- 加载方式:`exec` 直接加载 `setup.command` 真实源码(替换 `__main__` 守卫),与生产运行路径一致,不复制代码;Windows 行为通过替换 `IS_WINDOWS = True` 模拟
+- 加载方式:`tokenplan_setup._runtime.execute_sources()` 按构建顺序把分层源码
+  执行进一个独立命名空间,复现单文件产物的扁平语义;剥离内部 import 的转换函数
+  与 `scripts/build_dist.py` 共用同一份实现,产物与测试无法各自漂移。每层仍以真实
+  `tokenplan_setup/*.py` 文件名编译,覆盖率与异常定位都指向源码;Windows 行为通过
+  替换 `IS_WINDOWS = True` 模拟
 - 沙箱:`sandbox()` 把模块 HOME 重定向到临时目录,测试不碰真实用户目录
 - 覆盖:注册表完整性、TOML 手术、各配置器端到端、卸载生命周期、权限、交互流 EOF 安全、远程目录回退与哈希三态、远程脚本 fail-closed、退出码契约、JSON 输出、环境变量 Key、HTTP 入口、doctor --deep、**一致性组**(npm/lib 字节一致、setup.bat 版本+SHA256 一致、models.json.sha256 一致、无死代码、无硬编码路径)
 - 交互测试不触网:`run_remote_script` 打桩、`TOKENPLAN_API_KEY` 显式清理(防宿主机环境污染)
@@ -264,26 +308,71 @@ get_model_ids(plan)
 ```bash
 python3 tests/run_tests.py            # 全部
 python3 tests/run_tests.py codex      # 单组
+python3 -m pytest                     # 模块化分层测试
+python3 -m pytest --cov=tokenplan_setup
+python3 -m ruff check .
+python3 -m mypy
+lint-imports
+python3 scripts/check_tool_versions.py   # npm 版本与 integrity 实时核对(需联网)
 ```
+
+pytest 套件按职责拆分为 domain/registry、12 配置器参数化契约、build
+artifact、entrypoint 四层。配置器测试使用临时 HOME、mock 外部命令与网络,
+fixtures 覆盖旧品牌和损坏配置,不会读取或改写真实用户配置。
+
+覆盖率的真实构成需要说清楚:`fail_under = 75` 是防回退下限,当前总覆盖约
+80.5%,其中相当一部分来自参数化执行的 293 项旧回归;若只跑分层 pytest,
+覆盖率约 40.7%(65 项)。也就是说**行为保障的主体仍是旧回归套件**,但分层
+测试已从"只守注册表和文件契约"扩展到覆盖高风险失败路径。覆盖率只证明代码
+被执行过,不证明行为被断言正确。
+
+`tests/test_failure_paths.py` 专门覆盖那些会触网、动用户 shell 或写注册表的
+分支,均以显式桩断言可观测行为:远程目录的完整性三态(哈希匹配 / 不匹配 /
+`.sha256` 拿不到)与哈希通过但内容不可解析、后付费发现的 HTTP 错误与连接失败、
+远程脚本 fail-closed 与执行留痕、安装命令失败与可执行文件缺失、npm 命令的精确
+pin 与私有 cache、Windows `setx`/`reg` 台账(含"原值不存在应记为 None")。
+
+`tests/test_isolation.py` 守的是测试本身的安全性。`HOME`/`BACKUP_DIR`/
+`STATE_PATH` 在各层是 `from ... import` 的导入期快照,只 patch `infrastructure`
+并不够——`flows` 持有自己的 `BACKUP_DIR`,曾因此在测试中读取真实的
+`~/.tokenplan-backups` 并尝试覆盖真实用户配置。该文件用 `pkgutil` 遍历包内所有
+模块,断言没有任何路径常量逃出临时目录,新增模块忘记纳入沙箱会被直接点名。
+
+剩余未覆盖部分集中在交互式主流程分支与部分平台专属路径,应继续补测,不应通过
+排除源码或下调阈值来改善数字。
+
+开发依赖只存在于 `project.optional-dependencies.dev`:pytest、pytest-cov/
+coverage、Ruff、mypy、import-linter;`project.dependencies` 保持为空。
+mypy 对显式模块边界、源码拼装层和构建脚本执行严格检查,层级完整性另由
+import-linter 对全部业务模块守卫。
 
 ---
 
 ## 11. 发布链路
 
 ```
-改 setup.command
-  → python3 tests/run_tests.py        # 229 项必须全绿
-  → python3 scripts/sync_npm_lib.py   # ① 复制主脚本 → npm/lib/
-                                       # ② 注入 SETUP_VERSION/SETUP_SHA256 → setup.bat
-                                       # ③ 再生 models.json.sha256
+改 tokenplan_setup/ 或 models.json
+  → python3 scripts/build_dist.py      # 重建五项确定性产物
+  → 旧回归 + pytest + ruff + mypy + lint-imports + build --check
+  → 同步 pyproject/npm/models 的精确 SemVer
   → git commit + tag vX.Y.Z + push
-  → GitHub Release 创建,附件上传 setup.command(setup.bat 的第一下载源依赖它)
-  → cd npm && npm publish
+  → 标签工作流重跑三平台矩阵并执行 git diff 门禁
+  → 创建 GitHub Release 并上传 setup.command/setup.bat/models*
+  → Release 资产可用后 npm publish
 ```
 
 ### 一致性保障
 
-- **CI**(`.github/workflows/tests.yml`):ubuntu + windows × Python 3.9/3.12 矩阵跑回归 + `--version` 冒烟;**发布前必须等 CI 绿**(v2.5.0 就靠它拦下一个 Windows 问题,见下)
+- **CI**(`.github/workflows/tests.yml`):Ubuntu/macOS/Windows × Python
+  3.9/3.12/3.13,运行旧回归、pytest、Ruff、mypy、import-linter、
+  `build_dist.py --check`、Python module 与 npm wrapper 冒烟
+- weekly schedule 另有 `supply-chain-pins` job 实时核对 npm 版本与 integrity,
+  该 job 不允许失败(见 §6 的供应链边界说明)
+- PR 路径不访问模型官方文档;`check_models.py` 只在 weekly schedule 的
+  allow-failure job 运行,外部网络波动不会阻塞合并
+- **标签发布**(`release.yml`):最小权限、environment 与按标签 concurrency;
+  先上传不可变 GitHub Release 资产,再发布 npm,避免 `setup.bat` 已经分发
+  但其固定版本下载目标尚不存在
 - **`.gitattributes`**:`setup.command` / `npm/lib/setup.command` / `models.json` / `models.json.sha256` 锁 `eol=lf`(字节级完整性契约——哈希校验要求所有平台检出为相同字节);`setup.bat` 锁 `eol=crlf`;规则必须在 `*.json text=auto` 之后(gitattributes 后行覆盖前行)
 - **真实事故记录**(v2.5.0 发布过程):`models.json` 起初只有 `*.json text=auto` 规则,Windows runner 检出时 LF→CRLF,字节变化导致 SHA256 一致性测试失败;macOS 本地永远测不出来。修复 = 补 `eol=lf` 规则。这是"哈希契约必须锁行尾"的直接教训
 
@@ -320,13 +409,16 @@ python3 tests/run_tests.py codex      # 单组
 
 | 文件 | 职责 |
 |---|---|
-| `setup.command` | 全部核心逻辑(唯一实现文件) |
+| `tokenplan_setup/` | 模块化维护源码与 Python 模块入口 |
+| `setup.command` | 从模块化源码确定性生成的单文件发布产物 |
 | `models.json` / `models.json.sha256` | 远程模型目录 + 完整性哈希 |
 | `setup.bat` | Windows 免 Node 下载器 |
 | `npm/bin/tokenplan-setup.js` | npx 入口(Python 探测 + 透传) |
 | `npm/package.json` / `npm/lib/` | npm 包定义与载荷 |
-| `scripts/sync_npm_lib.py` | 发布同步(字节一致 + 哈希注入 + 目录哈希再生) |
+| `scripts/build_dist.py` | 生成单文件、npm 载荷、模型目录代码、摘要与 bat 元数据 |
+| `scripts/sync_npm_lib.py` | 旧同步命令兼容层 |
 | `scripts/check_models.py` | 目录与官方文档对照 |
-| `tests/run_tests.py` | 229 项回归 |
+| `scripts/check_tool_versions.py` | npm 版本/integrity 实时核对门禁 |
+| `tests/run_tests.py` / `tests/test_*.py` | 293 项旧回归 + 分层 pytest |
 | `.github/workflows/tests.yml` | CI 矩阵 |
 | `.gitattributes` | 行尾策略(完整性契约的组成部分) |

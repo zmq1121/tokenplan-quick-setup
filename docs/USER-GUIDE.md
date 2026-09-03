@@ -17,6 +17,8 @@
 - 运行一次完成全部配置,之后直接使用对应的 AI 工具
 - 不常驻后台、不代理网络流量、不上传数据
 - 支持通过 `uninstall` 从备份完整还原
+- 当前安装器版本为 2.7.0;Python 运行时要求 3.9+,且无第三方运行时依赖
+- 安装器对 npm 工具使用审核清单中的精确版本,不会在安装时自动追随 `latest`
 
 ## 获取 API Key
 
@@ -127,7 +129,9 @@ TOKENPLAN_API_KEY=<KEY> bash setup.command doctor --deep --plan enterprise-pro
 
 - API Key 优先级:`--api-key` 参数 > 环境变量 `TOKENPLAN_API_KEY` > 交互输入。命令行参数会留在 shell 历史里,推荐环境变量
 - `--json`(setup 与 doctor 支持):过程日志转 stderr,stdout 只输出结构化结果,密钥自动打码,便于 jq 解析或落盘存档
-- 退出码契约:`0` 成功,`1` 用户取消,`2` 环境不满足,`3` 部分工具配置失败
+- 退出码契约:`0` 成功,`1` 用户取消,`2` 环境或必要参数不满足,
+  `3` 配置/诊断/模型验证失败。2.5.0 起失败不再统一返回 0,自动化必须按
+  退出码处理
 
 ```bash
 TOKENPLAN_API_KEY=<KEY> bash setup.command --plan enterprise-pro --yes --json > result.json 2> setup.log
@@ -170,6 +174,15 @@ bash setup.command --plan postpaid --api-key <KEY> --models glm-5.3,kimi-k3 --ye
 **安装中断或网络超时**
 
 重新运行即可,已完成的步骤会自动跳过。
+
+**如何确认下载版本与 npm 版本一致**
+
+正式版本使用 `vX.Y.Z` 标签驱动发布。`pyproject.toml`、npm 包、
+安装器内置版本和 `models.json.latest_version` 必须精确一致;发布流程会
+先跑 Ubuntu/macOS/Windows 的 Python 3.9/3.12/3.13 检查并重建产物,
+随后先创建 GitHub Release 并上传固定版本资产,再发布 npm。文档中的真实端到端结果来自
+历史人工核验,本地/CI 自动测试不会使用真实 API Key 或宣称重新执行了云端
+端到端验证。
 
 **更换套餐或 Key**
 

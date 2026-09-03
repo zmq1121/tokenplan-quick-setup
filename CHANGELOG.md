@@ -2,6 +2,89 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [2.7.0] - 2026-09-03
+
+### 新增
+
+- `scripts/check_tool_versions.py`:直接查 npm registry 逐包比对
+  `dist.integrity`,把此前仅"留档"的清单变成可执行门禁。精确版本 pin 防不住
+  同一版本号下 tarball 被重新发布,这是唯一能发现该情况的手段;退出码区分
+  "确定不一致"(1)与"网络异常无法证明"(2),避免把不可用误报成不一致
+- CI 每周新增 `supply-chain-pins` job 执行上述核对,**不设**
+  `continue-on-error`:偶发网络误报可以接受,静默的供应链漂移不行
+- 远程第三方安装脚本执行留痕:`run_remote_script()` 在执行前把
+  `{tool, url, sha256, bytes}` 记入台账;`uninstall` 在两条返回路径上都会列出
+  并明确说明这部分副作用无法自动回滚,`--json` 同步暴露 `remote_scripts` 字段。
+  上游未发布固定哈希,事前校验做不到,但"这台机器上执行过哪份脚本"必须可审计
+- `tests/test_failure_paths.py`:为会触网、动用户 shell 或写注册表的分支补真实
+  断言——远程目录完整性三态与"哈希通过但内容不可解析"、后付费发现的 HTTP
+  错误与连接失败、远程脚本 fail-closed、安装命令失败与可执行文件缺失、npm 命令
+  的精确 pin 与私有 cache、Windows `setx`/`reg` 台账
+- `tests/test_isolation.py`:用 `pkgutil` 遍历包内模块,断言没有任何路径常量
+  逃出临时目录,新增模块忘记纳入沙箱会被点名
+
+### 修复
+
+- **测试隔离缺陷**:`flows` 持有 `BACKUP_DIR` 的导入期快照,而 `isolated_home`
+  只 patch 了 `infrastructure`,导致 `uninstall` 在测试中读取真实的
+  `~/.tokenplan-backups` 并尝试覆盖真实用户配置。现改为对所有持有快照的模块
+  动态打补丁,并由隔离守卫测试防止复发
+- `uninstall --json` 的字段形状在两条返回路径上不一致(提前返回缺少
+  `remote_scripts`);统一收敛到单一出口
+- pytest 显式声明 `pythonpath = ["."]`:CI 会 `pip install .`,此前能跑到工作树
+  代码只是因为 `python -m` 恰好把 cwd 放进 `sys.path`,存在跑成 site-packages
+  旧副本的风险
+
+- 修复 `patch_hermes_model_routing()` 使用 `Path.home()` 绕过模块 `HOME` 常量的
+  问题:该路径此前不受测试沙箱重定向约束,在已安装 Hermes 的机器上运行测试
+  可能改写真实用户的 `model_switch.py`;现统一走 `HOME`,并新增沙箱内的补丁
+  改写与"未安装则跳过"两条用例
+- 移除生产入口的重复运行时:`entrypoint.py` 此前经 `_runtime.NAMESPACE` 执行
+  源码的第二份副本,导致导入的包模块与实际执行的对象是两套互不相通的模块级
+  状态(测试断言的和线上跑的不是同一份)。现在 `__main__ → entrypoint → cli.main`
+  直接运行导入的包,`_runtime` 只服务于构建脚本与旧回归;新增守卫用例断言普通
+  `import tokenplan_setup` 不再加载 `_runtime`
+- 远程模型目录解析异常不再被 `except Exception: pass` 静默吞掉;内容已过哈希
+  校验却解析失败时会明确告警后回退内置目录
+- `reg` 补入 `SYSTEM_DEPENDENCY_REGISTRY`:Windows 读取用户环境变量与卸载清理
+  实际依赖它,此前 doctor 不检测,缺失时故障难以定位
+- 删除 `code`(VS Code CLI)相关的不可达分支:两个 backend 的 `requires` 均为空、
+  `code` 也不在系统依赖注册表中,该检查恒为假
+
+### 变更
+
+- `SOURCE_ORDER` 与内部 import 剥离逻辑收敛到 `tokenplan_setup/_runtime.py`
+  单一来源,`scripts/build_dist.py` 改为复用;此前两份独立实现存在静默漂移风险
+  (漂移后单文件产物与旧回归所测语义会分叉)。合并后产物字节不变
+- 文档修正:配置器数量 10 → 12、旧回归加载方式(不再是 exec 单文件产物)、
+  polyglot 头实际内容、`293+` → `293`;并如实记录覆盖率构成(总体 77.69%,
+  仅分层 pytest 29.78%)与 npm `integrity` 仅留档、安装期未强制校验的边界
+- 旧回归 pytest 包装新增"组内至少有一条断言"检查,防止测试组被改空后静默假绿
+
+### 工程质量与模块化发布
+
+- `pyproject.toml` 增加仅开发环境使用的 pytest/coverage、Ruff、mypy 与
+  import-linter extra;Python 运行时依赖继续保持为空
+- 新增分层 pytest 套件:domain/registry、12 个配置器参数化文件契约、
+  确定性构建产物、`python -m tokenplan_setup` 与 npm Node 包装器入口;
+  全部配置测试使用临时 HOME/mock I/O,不接触真实用户配置
+- import-linter 固化 `infrastructure → domain → adapters → flows → cli`
+  构建层级并隔离动态 `_runtime` 兼容层;修复模块化基础设施路径中远程脚本
+  HTTP 错误格式化对后层函数的隐式依赖
+- Node 包装器导出 Python 检测与 `main`,增加 `require.main` 守卫,保留原有
+  参数透传与退出码行为;用户可见文案统一为 TokenHub
+- CI 扩为 Ubuntu/macOS/Windows × Python 3.9/3.12/3.13,覆盖 293 项旧回归、
+  pytest、Ruff、mypy、import-linter、确定性构建和双入口冒烟;官方模型文档
+  网络核对移至每周允许失败任务
+- 新增 `vX.Y.Z` 标签发布工作流:全矩阵前置、版本一致性与生成物 diff 门禁、
+  最小权限/environment/concurrency;先创建 GitHub Release 并上传不可变的
+  单文件与模型目录资产,确认固定下载目标存在后再发布 npm
+
+以上均为离线/本地工程验证变更,不表示重新执行了真实 API Key 或云端工具的
+端到端验证。
+
 ## [2.6.1] - 2026-09-03
 
 ### 修复

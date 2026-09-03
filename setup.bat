@@ -38,10 +38,10 @@ echo   ✅ Python 已就绪 (%PY_CMD%)
 echo.
 
 REM ── 2. 下载主脚本（固定版本镜像，多源回退） ────────────────────
-REM SETUP_VERSION / SETUP_SHA256 由 scripts/sync_npm_lib.py 自动注入,
+REM SETUP_VERSION / SETUP_SHA256 由 scripts/build_dist.py 自动注入,
 REM 手动修改无效——修改 setup.command 后必须重新运行同步脚本。
-set "SETUP_VERSION=2.6.1"
-set "SETUP_SHA256=d30f86e8272366246487885695d32a6b1ae601400cbb17dbbad9745987c77cfc"
+set "SETUP_VERSION=2.7.0"
+set "SETUP_SHA256=ea1dbe28a1a0bba622b27b515486d0fc84d6d10b6e92b28c571c65e508d5c80a"
 
 set "TMPFILE=%TEMP%\tokenplan-setup.py"
 

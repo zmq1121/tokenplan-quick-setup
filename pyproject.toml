@@ -1,0 +1,100 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokenplan-setup"
+version = "2.7.0"
+description = "腾讯云 TokenHub 一键接入 CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "tokenplan-quick-setup contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "coverage[toml]>=7.6,<8",
+    "import-linter>=2.1,<3",
+    "mypy>=1.11,<2",
+    "pytest>=8.3,<9",
+    "pytest-cov>=5,<7",
+    "ruff>=0.6,<1",
+]
+
+[project.scripts]
+tokenplan-setup = "tokenplan_setup.entrypoint:main"
+
+[tool.setuptools]
+packages = ["tokenplan_setup"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -ra --cov=tokenplan_setup --cov-report=term-missing"
+testpaths = ["tests"]
+# 显式指向工作树:CI 会 `pip install .`,若依赖 sys.path 的偶然顺序,测试可能
+# 跑的是 site-packages 里的旧副本而不是本次改动的源码。
+pythonpath = ["."]
+markers = [
+    "artifact: deterministic distribution artifact checks",
+    "entrypoint: subprocess entrypoint checks",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["tokenplan_setup"]
+
+[tool.coverage.report]
+fail_under = 75
+precision = 2
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+extend-exclude = ["setup.command", "npm/lib/setup.command", "tests/run_tests.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"tokenplan_setup/infrastructure.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.9"
+files = [
+    "tokenplan_setup",
+    "scripts",
+]
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.importlinter]
+root_package = "tokenplan_setup"
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Business modules follow the build layers"
+type = "layers"
+layers = [
+    "tokenplan_setup.cli",
+    "tokenplan_setup.flows",
+    "tokenplan_setup.adapters",
+    "tokenplan_setup.domain",
+    "tokenplan_setup.infrastructure",
+]
+
+[[tool.importlinter.contracts]]
+name = "Source bundler does not import business layers"
+type = "forbidden"
+source_modules = ["tokenplan_setup._runtime"]
+forbidden_modules = [
+    "tokenplan_setup.infrastructure",
+    "tokenplan_setup.domain",
+    "tokenplan_setup.adapters",
+    "tokenplan_setup.flows",
+    "tokenplan_setup.cli",
+]

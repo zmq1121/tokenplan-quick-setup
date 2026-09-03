@@ -5,8 +5,8 @@
     python3 tests/run_tests.py            # 全部测试
     python3 tests/run_tests.py codex      # 只跑名称含 codex 的组
 
-加载方式说明:setup.command 是 bash/python polyglot 单文件,这里用
-exec 加载它(禁用 main 入口),与真实运行路径一致,不复制代码。
+加载方式说明:通过 tokenplan_setup._runtime 将分层源码执行进独立模块命名空间。
+每层仍以真实 tokenplan_setup/*.py 文件名编译,便于覆盖率与异常定位。
 """
 import contextlib
 import io
@@ -33,6 +33,10 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "setup.command"
 NPM_LIB = REPO / "npm" / "lib" / "setup.command"
 NPM_PKG = REPO / "npm" / "package.json"
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from tokenplan_setup._runtime import execute_sources
 
 # ---------------------------------------------------------------------------
 # 加载被测模块
@@ -42,12 +46,19 @@ PASSES: list = []
 
 
 def load_module(windows: bool = False):
-    src = SCRIPT.read_text(encoding="utf-8")
-    src = src.replace("if __name__ == \"__main__\":", "if False:")
-    if windows:
-        src = src.replace('IS_WINDOWS = sys.platform == "win32"', "IS_WINDOWS = True", 1)
     mod = types.ModuleType("setup_under_test")
-    exec(compile(src, str(SCRIPT), "exec"), mod.__dict__)
+    mod.__package__ = "tokenplan_setup"
+
+    def transform(_path: Path, source: str) -> str:
+        if windows:
+            return source.replace(
+                'IS_WINDOWS = sys.platform == "win32"',
+                "IS_WINDOWS = True",
+                1,
+            )
+        return source
+
+    execute_sources(mod.__dict__, transform)
     return mod
 
 
@@ -236,6 +247,85 @@ def test_uninstall():
     with contextlib.redirect_stdout(io.StringIO()):
         code = mod.run_uninstall(yes=True)
     check("卸载: 空环境正常退出", code == 0)
+
+    # 任一还原失败必须传播为配置失败退出码。
+    tmp = sandbox(mod)
+    broken_cfg = tmp / ".codex" / "config.toml"
+    broken_cfg.parent.mkdir(parents=True)
+    broken_cfg.write_text("original")
+    mod.backup_file(broken_cfg)
+    broken_cfg.write_text("changed")
+    real_copy2 = mod.shutil.copy2
+    mod.shutil.copy2 = lambda *a, **k: (_ for _ in ()).throw(OSError("denied"))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = mod.run_uninstall(yes=True)
+    finally:
+        mod.shutil.copy2 = real_copy2
+    check("卸载: 还原失败 → 3", code == mod.EXIT_CONFIG_FAILED)
+
+    # 删除失败的文本与 JSON 契约必须返回同一退出码。
+    tmp = sandbox(mod)
+    generated = tmp / "generated"
+    generated.write_text("x")
+    mod.record_state("files_written", str(generated))
+    real_unlink = Path.unlink
+    Path.unlink = lambda self, *a, **k: (
+        (_ for _ in ()).throw(OSError("denied"))
+        if self == generated else real_unlink(self, *a, **k)
+    )
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            text_code = mod.run_uninstall(yes=True)
+        sys.argv = ["x", "uninstall", "--yes", "--json"]
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            json_code = mod.main()
+        payload = json.loads(out_buf.getvalue())
+    finally:
+        Path.unlink = real_unlink
+    check("卸载: 删除失败 → 3", text_code == mod.EXIT_CONFIG_FAILED)
+    check("卸载 JSON: 退出码与文本一致",
+          json_code == text_code == payload.get("exit_code") == mod.EXIT_CONFIG_FAILED)
+    check("卸载 JSON: 失败操作结构化",
+          payload.get("failures") and payload["failures"][0]["kind"] == "delete")
+
+
+def test_uninstall_windows_setx():
+    mod = load_module(windows=True)
+    sandbox(mod)
+    mod.record_state("setx_keys", {"key": "TOKENPLAN_OLD", "old": "before"})
+    mod.record_state("setx_keys", {"key": "TOKENPLAN_NEW", "old": None})
+    commands = []
+
+    def _ok(command, **kwargs):
+        commands.append(command)
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    real_run = mod.subprocess.run
+    mod.subprocess.run = _ok
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = mod.run_uninstall(yes=True)
+    finally:
+        mod.subprocess.run = real_run
+    check("Win 卸载: setx 还原旧值",
+          ["setx", "TOKENPLAN_OLD", "before"] in commands)
+    check("Win 卸载: reg delete 删除新增变量",
+          ["reg", "delete", "HKCU\\Environment", "/v", "TOKENPLAN_NEW", "/f"] in commands)
+    check("Win 卸载: 环境变量操作成功 → 0", code == mod.EXIT_OK)
+
+    sandbox(mod)
+    mod.record_state("setx_keys", {"key": "TOKENPLAN_FAIL", "old": "before"})
+    mod.subprocess.run = lambda *a, **k: type(
+        "R", (), {"returncode": 5, "stdout": "", "stderr": "access denied"}
+    )()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = mod.run_uninstall(yes=True)
+    finally:
+        mod.subprocess.run = real_run
+    check("Win 卸载: setx 失败 → 3", code == mod.EXIT_CONFIG_FAILED)
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +575,23 @@ def test_workbuddy_config():
     ids2 = [e["id"] for e in json.loads(models.read_text())]
     check("WorkBuddy: 重跑后条目数不变(幂等)", len(ids2) == len(ids))
     check("WorkBuddy: doctor 签名存在", mod.probe_config(mod.TOOL_BY_KEY["workbuddy"]) is True)
+
+    # WorkBuddy 运行中必须 fail-closed，不能覆盖现有 models.json。
+    before = models.read_bytes()
+    real_which, real_run = mod.shutil.which, mod.subprocess.run
+    mod.shutil.which = lambda name: "/usr/bin/pgrep" if name == "pgrep" else real_which(name)
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 0})()
+    blocked = False
+    try:
+        with contextlib.redirect_stdout(_io.StringIO()):
+            mod.configure_workbuddy(base, "sk-must-not-be-written", plan)
+    except RuntimeError:
+        blocked = True
+    finally:
+        mod.shutil.which = real_which
+        mod.subprocess.run = real_run
+    check("WorkBuddy: pgrep 运行中阻止配置", blocked)
+    check("WorkBuddy: pgrep 运行中不写文件", models.read_bytes() == before)
 
 
 def test_write_json_list_merge():
@@ -1198,6 +1305,30 @@ def test_exit_codes():
                    "--tools", "codex", "--verify-models", "off"], ["1"])
     check("退出码: 配置成功 → 0", code == 0)
 
+    # repair 对未安装工具只跳过，绝不调用安装器。
+    install_calls = []
+    real_is_installed, real_install = mod.is_tool_installed, mod.install_tool
+    mod.is_tool_installed = lambda t: False
+    mod.install_tool = lambda t: (install_calls.append(t.key), True)[1]
+    code, _ = run(["x", "repair", "--plan", "enterprise-pro",
+                   "--api-key", "sk-fake-key-1234567890",
+                   "--tools", "codex", "--verify-models", "off"])
+    mod.is_tool_installed, mod.install_tool = real_is_installed, real_install
+    check("repair: 缺失工具不触发安装", code == 0 and install_calls == [])
+
+    # 配置写入成功但任一模型验证失败，整体仍是配置失败(3)。
+    sandbox(mod)
+    real_verify_models = mod.verify_models
+    mod.verify_models = lambda *a, **k: {
+        "model-ok": (True, ""),
+        "model-failed": (False, "HTTP 403"),
+    }
+    code, _ = run(["x", "--plan", "enterprise-pro",
+                   "--api-key", "sk-fake-key-1234567890",
+                   "--tools", "codex", "--verify-models", "all"], ["1"])
+    mod.verify_models = real_verify_models
+    check("退出码: verify_models 任一失败 → 3", code == mod.EXIT_CONFIG_FAILED)
+
     # doctor:已安装但配置缺失 → 3(全新沙箱,probe 面对不存在的配置文件)
     sandbox(mod)
     mod.is_tool_installed = lambda t: True
@@ -1594,12 +1725,81 @@ def test_brand_migration():
           and blines[-1].lstrip().startswith("╚"))
 
 
+def test_supply_chain_registries():
+    """Independent guards for pinned npm, immutable catalog and system dependencies."""
+    mod = load_module()
+    expected_versions = {
+        "@tencent-ai/codebuddy-code": "2.143.1",
+        "@anthropic-ai/claude-code": "2.1.259",
+        "opencode-ai": "1.18.27",
+        "openclaw": "2026.8.2",
+        "@deepseek-ai/dsh": "0.1.1-rc.2",
+        "@openai/codex": "0.153.0",
+        "@moonshot-ai/kimi-code": "0.40.1",
+        "@xai-official/grok": "1.0.13",
+        "@earendil-works/pi-coding-agent": "0.84.4",
+    }
+    actual_versions = {
+        package: entry["version"]
+        for package, entry in mod.VERIFIED_TOOL_VERSIONS.items()
+    }
+    check("供应链注册表: npm 查询快照完整", actual_versions == expected_versions)
+    check("供应链注册表: registry integrity 均有记录",
+          all(
+              str(entry["integrity"]).startswith("sha512-")
+              for entry in mod.VERIFIED_TOOL_VERSIONS.values()
+          ))
+    check("供应链注册表: DSH 如实标记仅预发布",
+          mod.VERIFIED_TOOL_VERSIONS["@deepseek-ai/dsh"]["stability"]
+          == "prerelease-only")
+
+    installed_specs = set()
+    for tool in mod.TOOLS:
+        for command in (tool.install_cmd, tool.install_cmd_win):
+            if isinstance(command, tuple) and command and command[0] == "npm":
+                installed_specs.add(command[-1])
+    expected_specs = {
+        f"{package}@{version}" for package, version in expected_versions.items()
+    }
+    check("供应链注册表: npm 安装全部使用清单精确版本",
+          installed_specs == expected_specs)
+    check("供应链注册表: npm 安装不含 @latest",
+          all(not spec.endswith("@latest") for spec in installed_specs))
+
+    expected_catalog_url = (
+        "https://cdn.jsdelivr.net/gh/zmq1121/"
+        f"tokenplan-quick-setup@v{mod.VERSION}/models.json"
+    )
+    check("供应链注册表: models URL 绑定 VERSION 标签",
+          mod.REMOTE_CATALOG_URL == expected_catalog_url)
+    check("供应链注册表: models SHA URL 与内容同标签",
+          mod.REMOTE_CATALOG_SHA256_URL == expected_catalog_url + ".sha256")
+
+    expected_dependencies = {
+        "python", "node", "npm", "npx", "bash", "curl", "certutil", "pgrep",
+        "setx", "reg",
+    }
+    check("供应链注册表: 系统/平台依赖覆盖完整",
+          set(mod.SYSTEM_DEPENDENCY_REGISTRY) == expected_dependencies)
+    check("供应链注册表: 每项声明命令、平台和用途",
+          all(
+              entry.get("commands")
+              and entry.get("platforms")
+              and entry.get("required_by")
+              and isinstance(entry.get("optional"), bool)
+              for entry in mod.SYSTEM_DEPENDENCY_REGISTRY.values()
+          ))
+    check("供应链注册表: doctor 通过注册表检测当前 Python",
+          mod.system_dependency_available("python"))
+
+
 TEST_GROUPS = [
     ("registry", test_registry),
     ("registry-windows", test_registry_windows),
     ("toml", test_toml_surgery),
     ("codex", test_codex_config),
     ("uninstall", test_uninstall),
+    ("uninstall-windows", test_uninstall_windows_setx),
     ("permissions", test_permissions),
     ("postpaid", test_postpaid),
     ("workbuddy", test_workbuddy_config),
@@ -1623,6 +1823,7 @@ TEST_GROUPS = [
     ("doctor-deep", test_doctor_deep),
     ("brand-migration", test_brand_migration),
     ("consistency", test_repo_consistency),
+    ("supply-chain", test_supply_chain_registries),
 ]
 
 

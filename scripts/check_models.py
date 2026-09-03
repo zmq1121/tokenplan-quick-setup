@@ -25,6 +25,7 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 MODELS_JSON = REPO / "models.json"
@@ -206,7 +207,7 @@ def main() -> int:
                 pass
 
     catalog = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
-    report = {}
+    report: dict[str, dict[str, Any]] = {}
     errors = []
     for plan_key in DOC_PAGES:
         try:

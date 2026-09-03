@@ -31,15 +31,18 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 ### 安装器自身的安全口径
 
-- **远程安装脚本**(Hermes / OpenClaw,macOS):先完整下载到本地、展示来源 URL 与 SHA256 指纹、经确认后才执行;非交互环境一律拒绝(用 `--yes` 跳过确认,指纹仍会打印)
-- **npm 安装**统一 `--ignore-scripts`,拦截安装期 lifecycle 脚本(供应链攻击重点面;这些 CLI 均通过平台包分发二进制,不需要安装脚本)
-- **远程模型目录**(`models.json`)带 SHA256 完整性校验,哈希对不上或拿不到哈希文件时回退内置目录
+- **远程安装脚本**(Hermes / OpenClaw,macOS):上游未发布可预先固定的官方摘要,因此不能声称下载前已验证。安装器先完整下载到本地、展示本次内容的来源 URL 与 SHA256 指纹、经确认后才执行;非交互环境一律拒绝(用 `--yes` 跳过确认,指纹仍会打印)
+- **npm 安装**使用代码内单一 `VERIFIED_TOOL_VERSIONS` 清单中的精确版本,并统一加 `--ignore-scripts`;不会在安装时跟随裸包或 `@latest` 漂移。DeepSeek Harness 截至 2026-09-03 仅发布 RC,清单明确标记为 `prerelease-only`
+- **远程模型目录**(`models.json`)从与安装器 `VERSION` 对应的不可变 `@v{VERSION}` 标签读取,并从同一标签读取 SHA256;哈希对不上或拿不到哈希文件时回退内置目录
 - API Key 永不全量回显(终端与 `--json` 输出均打码);写入的配置文件权限收紧为 `0600`
 
 ## 运行环境
 
-- macOS 12+ 或 Windows 10/11,已安装 Python 3(Windows 推荐 `winget install Python.Python.3.12`,安装时勾选 Add to PATH)
-- 安装 CLI 类工具(Claude Code、Codex 等)需要 Node.js LTS;未安装时安装器会尝试自动安装
+- macOS 12+、Windows 10/11 或常见 Linux,运行时仅要求 Python 3.9+(Python 包的 `dependencies` 为空)
+- `npx` 入口和 npm 类工具需要 Node.js 16+;发布与 CI 使用 Node.js 22
+- 安装 CLI 类工具(Claude Code、Codex 等)需要 Node.js/npm;缺失时安装器会给出明确提示
+
+系统依赖口径集中在 `SYSTEM_DEPENDENCY_REGISTRY`:Python 3 是所有入口的运行时;Node/npm 供 npm 工具安装,npx 供 DSH 与 npm 入口,bash 供 macOS/Linux 单文件及 Hermes/OpenClaw 远程脚本。Windows 下载器使用 curl 下载并以 certutil 校验,环境变量持久化使用 setx;macOS/Linux 的 pgrep 仅用于 WorkBuddy 进程防覆盖检查。Python 安装器自身通过标准库联网,不依赖系统 curl。
 
 首次安装 CLI 后如提示 `command not found`,重新打开终端或执行 `source ~/.zshrc`。
 
@@ -161,7 +164,7 @@ claude-tokenhub           # 列出当前套餐全部模型,选择后启动
 ## 其它工具备注
 
 - **OpenClaw**:写入 `~/.openclaw/openclaw.json` 与 `.env`,使用 `tokenhub` Provider,同时写入 models allowlist 以避免内置模型列表遮挡套餐模型。验证命令:`openclaw models list --provider tokenhub`
-- **OpenCode**:写入 `~/.config/opencode/opencode.json`,使用 `tokenplan` Provider,按 OpenAI 兼容端点生成
+- **OpenCode**:写入 `~/.config/opencode/opencode.json`,使用 `tokenhub` Provider,按 OpenAI 兼容端点生成
 - **DeepSeek Harness**:通过本机 `dsh` CLI 接入,启动命令 `dsh web`。如报 `cordis.patch.yml must be a top-level YAML array`,删除该文件或重置为空数组:
   ```bash
   rm ~/.dsh/cordis.patch.yml
@@ -171,10 +174,33 @@ claude-tokenhub           # 列出当前套餐全部模型,选择后启动
 ## 开发与测试
 
 ```bash
-python3 tests/run_tests.py          # 回归测试(229 项,零依赖)
+python3 -m pip install ".[dev]"     # 仅开发依赖;运行时依赖仍为空
+python3 tests/run_tests.py          # 旧回归测试(293 项,零依赖)
 python3 tests/run_tests.py codex    # 运行单个测试组
+python3 -m pytest                   # 分层 pytest 契约(临时 HOME/mock I/O)
+python3 -m ruff check .
+python3 -m mypy
+lint-imports                       # 无环与 infrastructure→…→cli 层级门禁
+python3 scripts/build_dist.py       # 从 tokenplan_setup/ 重建全部发布产物
+python3 scripts/build_dist.py --check
 python3 scripts/check_models.py     # 模型目录与官方文档对照
-python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 产物(并再生 models.json.sha256)
+python3 scripts/check_tool_versions.py  # npm 版本/integrity 实时核对(需联网)
 ```
 
-测试通过 exec 直接加载 `setup.command`,覆盖注册表完整性、配置器端到端、Windows 平台行为、卸载生命周期、文件权限、交互流 EOF 安全、远程目录回退与哈希校验、远程脚本 fail-closed、退出码契约、`--json` 输出等。发布 npm 前必须先通过测试再执行同步,一致性校验失败会直接报错。
+维护源码位于 `tokenplan_setup/`;`setup.command` 与 `npm/lib/setup.command`
+是 `scripts/build_dist.py` 生成的确定性产物,不要直接编辑。旧回归经
+`tokenplan_setup._runtime` 把分层源码执行进扁平命名空间(复现单文件语义,
+且与构建脚本共用同一份拼装逻辑);pytest 直接验证模块化源码、12 个配置器
+契约、生成物字节一致性、高风险失败路径和 Python/Node 入口。当前总覆盖率约
+80.5%,其中相当一部分来自旧回归——仅分层 pytest 约 40.7%,详见
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) 的测试体系一节。CI 覆盖
+Ubuntu/macOS/Windows × Python 3.9/3.12/3.13;PR 检查完全离线,官方模型文档
+核对每周执行且允许失败,npm 版本与 integrity 的实时核对每周执行且不允许失败。
+
+版本以 `pyproject.toml` 的精确 SemVer 为发布源,并要求
+`npm/package.json`、`models.json.latest_version`、生成脚本中的 `VERSION`
+完全一致。推送 `vX.Y.Z` 标签后,发布工作流先运行全矩阵与确定性 diff 门禁,
+然后创建 GitHub Release 并上传不可变的
+`setup.command`、`setup.bat`、`models.json` 与摘要文件,最后才发布 npm。
+这样 npm 包中的 Windows 下载器开始分发前,对应 Release 资产已可用。该流程不会在本地
+验证阶段执行真实发布。

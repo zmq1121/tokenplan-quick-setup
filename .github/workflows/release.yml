@@ -1,0 +1,91 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/tests.yml
+
+  validate-release:
+    needs: checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tag and package versions
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          npm_version="$(node -p 'require("./npm/package.json").version')"
+          test "$version" = "$python_version"
+          test "$version" = "$npm_version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Rebuild deterministically
+        run: python scripts/build_dist.py
+      - name: Reject generated artifact drift
+        run: git diff --exit-code -- setup.command setup.bat npm/lib/setup.command models.json.sha256 tokenplan_setup/_model_catalog.py
+      - name: Verify build check
+        run: python scripts/build_dist.py --check
+      - name: Stage release payload
+        shell: bash
+        run: |
+          mkdir release-assets
+          cp setup.command setup.bat models.json models.json.sha256 release-assets/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ steps.version.outputs.version }}
+          path: release-assets/
+          if-no-files-found: error
+
+  publish-github-release:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    environment: github-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ needs.validate-release.outputs.version }}
+          path: release-assets
+      - name: Create GitHub Release with immutable assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 本 job 故意不 checkout(只需产物),因此没有 git remote 可供 gh 推断
+          # 仓库;必须显式给出 GH_REPO,否则 gh release create 会直接失败。
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --verify-tag --generate-notes
+
+  publish-npm:
+    needs: [validate-release, publish-github-release]
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish npm package after release assets are available
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

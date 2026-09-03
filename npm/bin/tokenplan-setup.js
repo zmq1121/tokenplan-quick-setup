@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * tokenplan-setup — npx entry for the Tencent Cloud Token Plan installer.
+ * tokenplan-setup — npx entry for the Tencent Cloud TokenHub installer.
  *
  * The installer core is a single self-contained Python script
  * (lib/setup.command, polyglot bash/python). This Node wrapper only:
@@ -51,32 +51,52 @@ function detectPython() {
   return tryPython(candidates);
 }
 
-async function main() {
-  if (!fileExists(SCRIPT)) {
-    console.error("tokenplan-setup: bundled installer script missing: " + SCRIPT);
-    process.exit(1);
+async function main(argv = process.argv.slice(2), options = {}) {
+  const script = options.script || SCRIPT;
+  const findPython = options.detectPython || detectPython;
+  const spawnProcess = options.spawn || spawn;
+
+  if (!fileExists(script)) {
+    console.error("tokenplan-setup: bundled TokenHub installer missing: " + script);
+    return 1;
   }
 
-  const python = await detectPython();
+  const python = await findPython();
   if (!python) {
     console.error("tokenplan-setup: 未找到 Python 3，请先安装：");
     console.error("  macOS:   brew install python3  或 https://www.python.org/downloads");
     console.error("  Windows: winget install Python.Python.3.12");
-    process.exit(1);
+    return 1;
   }
 
-  const child = spawn(python.cmd, [...python.args, SCRIPT, ...process.argv.slice(2)], {
+  const child = spawnProcess(python.cmd, [...python.args, script, ...argv], {
     stdio: "inherit",
   });
 
-  child.on("error", (err) => {
-    console.error("tokenplan-setup: failed to start installer: " + err.message);
-    process.exit(1);
-  });
-
-  child.on("close", (code) => {
-    process.exit(code === null ? 1 : code);
+  return new Promise((resolve) => {
+    child.on("error", (err) => {
+      console.error("tokenplan-setup: 无法启动 TokenHub 安装器: " + err.message);
+      resolve(1);
+    });
+    child.on("close", (code) => {
+      resolve(code === null ? 1 : code);
+    });
   });
 }
 
-main();
+module.exports = {
+  SCRIPT,
+  fileExists,
+  tryPython,
+  detectPython,
+  main,
+};
+
+if (require.main === module) {
+  main().then((code) => {
+    process.exitCode = code;
+  }).catch((err) => {
+    console.error("tokenplan-setup: 未处理的启动错误: " + err.message);
+    process.exitCode = 1;
+  });
+}

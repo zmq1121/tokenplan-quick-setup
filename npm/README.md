@@ -31,6 +31,13 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 ### 安装器自身的安全口径
 
+> 供应链口径: npm 安装版本来自代码内单一 `VERIFIED_TOOL_VERSIONS`
+> 清单,均使用精确版本而非裸包或 `@latest`;DeepSeek Harness 截至
+> 2026-09-03 没有稳定版本,固定其 `latest` RC 并标为
+> `prerelease-only`。模型目录及 SHA 从不可变 `@v{VERSION}` 标签读取。
+> Hermes/OpenClaw 上游没有发布可预先固定的官方摘要,因此远程脚本的
+> SHA256 仅是下载后供人工核对的本次内容指纹,并非下载前信任锚。
+
 - **远程安装脚本**(Hermes / OpenClaw,macOS):先完整下载到本地、展示来源 URL 与 SHA256 指纹、经确认后才执行;非交互环境一律拒绝(用 `--yes` 跳过确认,指纹仍会打印)
 - **npm 安装**统一 `--ignore-scripts`,拦截安装期 lifecycle 脚本(供应链攻击重点面;这些 CLI 均通过平台包分发二进制,不需要安装脚本)
 - **远程模型目录**(`models.json`)带 SHA256 完整性校验,哈希对不上或拿不到哈希文件时回退内置目录
@@ -38,8 +45,12 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 ## 运行环境
 
-- macOS 12+ 或 Windows 10/11,已安装 Python 3(Windows 推荐 `winget install Python.Python.3.12`,安装时勾选 Add to PATH)
-- 安装 CLI 类工具(Claude Code、Codex 等)需要 Node.js LTS;未安装时安装器会尝试自动安装
+系统依赖统一登记在 `SYSTEM_DEPENDENCY_REGISTRY`:Python、Node/npm/npx、
+bash、curl、certutil、pgrep、setx。doctor 使用同一注册表检测 Node/npm/npx;
+Python 安装器通过标准库联网,不依赖系统 curl。
+
+- npm 包要求 Node.js 16+ 并探测 Python 3;模块化 Python 包要求 Python 3.9+
+- Python 运行时第三方依赖为空;pytest/coverage/Ruff/mypy/import-linter 仅属于源码仓库的 `dev` extra
 
 首次安装 CLI 后如提示 `command not found`,重新打开终端或执行 `source ~/.zshrc`。
 
@@ -161,7 +172,7 @@ claude-tokenhub           # 列出当前套餐全部模型,选择后启动
 ## 其它工具备注
 
 - **OpenClaw**:写入 `~/.openclaw/openclaw.json` 与 `.env`,使用 `tokenhub` Provider,同时写入 models allowlist 以避免内置模型列表遮挡套餐模型。验证命令:`openclaw models list --provider tokenhub`
-- **OpenCode**:写入 `~/.config/opencode/opencode.json`,使用 `tokenplan` Provider,按 OpenAI 兼容端点生成
+- **OpenCode**:写入 `~/.config/opencode/opencode.json`,使用 `tokenhub` Provider,按 OpenAI 兼容端点生成
 - **DeepSeek Harness**:通过本机 `dsh` CLI 接入,启动命令 `dsh web`。如报 `cordis.patch.yml must be a top-level YAML array`,删除该文件或重置为空数组:
   ```bash
   rm ~/.dsh/cordis.patch.yml
@@ -171,10 +182,20 @@ claude-tokenhub           # 列出当前套餐全部模型,选择后启动
 ## 开发与测试
 
 ```bash
-python3 tests/run_tests.py          # 回归测试(229 项,零依赖)
+python3 -m pip install ".[dev]"
+python3 tests/run_tests.py          # 旧回归测试(293 项,零依赖)
 python3 tests/run_tests.py codex    # 运行单个测试组
+python3 -m pytest
+python3 -m ruff check .
+python3 -m mypy
+lint-imports
+python3 scripts/build_dist.py --check
 python3 scripts/check_models.py     # 模型目录与官方文档对照
-python3 scripts/sync_npm_lib.py     # 修改 setup.command 后同步 npm 产物(并再生 models.json.sha256)
 ```
 
-测试通过 exec 直接加载 `setup.command`,覆盖注册表完整性、配置器端到端、Windows 平台行为、卸载生命周期、文件权限、交互流 EOF 安全、远程目录回退与哈希校验、远程脚本 fail-closed、退出码契约、`--json` 输出等。发布 npm 前必须先通过测试再执行同步,一致性校验失败会直接报错。
+`npm/lib/setup.command` 是从 `tokenplan_setup/` 确定性生成的载荷。
+Node 包装器导出 `detectPython` 与 `main`,且仅在直接执行时启动,便于无副作用
+测试。版本使用精确 SemVer,必须与 `pyproject.toml` 和模型目录版本一致。
+标签发布先通过三平台质量门禁并执行 `build_dist.py --check`,随后先
+创建 GitHub Release 并上传不可变资产,再执行 `npm publish`,确保 npm
+包开始分发时 `setup.bat` 对应的 Release 下载目标已经存在。

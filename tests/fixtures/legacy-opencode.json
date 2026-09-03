@@ -1,0 +1,14 @@
+{
+  "model": "openai/user-model",
+  "provider": {
+    "openai": {
+      "name": "User provider"
+    },
+    "tokenplan": {
+      "name": "Tencent Cloud Token Plan",
+      "options": {
+        "baseURL": "https://old.invalid"
+      }
+    }
+  }
+}

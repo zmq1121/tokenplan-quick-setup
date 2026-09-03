@@ -236,9 +236,53 @@ def ensure_npm_bin_on_path() -> None:
     info(f"npm 全局命令路径已加入: {npm_bin}")
 
 
+# 读启动器/shim 内容作为身份证据。上限尽量宽,让 Windows 上偶尔出现的
+# Node SEA 或 Rust 启动器仍能贡献可搜索字符串;超出上限就只用路径证据。
+_MARKER_CONTENT_LIMIT_BYTES = 4 * 1024 * 1024
+
+
 def is_tool_installed(tool: ToolSpec) -> bool:
-    """Detect installation via executable on PATH."""
-    return bool(tool.check_exe and shutil.which(tool.check_exe))
+    """Detect a tool by known install path, then by CLI identity on PATH.
+
+    Detection order:
+      1. Any `install_paths` entry exists (桌面应用/官方 standalone 安装器,
+         `~` 与 `${VAR}` 均会展开;未定义的变量保留原样,`exists()` 判 False)。
+      2. `check_exe` 在 PATH 上找不到:视作未安装。
+      3. `check_exe` 命中且未声明 markers:信任命令名(仅对已知不重名的工具)。
+      4. 声明了 markers:必须命中至少一个,比对语料为 `executable` 路径、
+         `Path.resolve()` 解析路径,以及可读大小内的启动器/shim 文本内容。
+    """
+    if any(
+        Path(os.path.expandvars(path)).expanduser().exists()
+        for path in tool.install_paths
+    ):
+        return True
+    if not tool.check_exe:
+        return False
+    executable = shutil.which(tool.check_exe)
+    if not executable:
+        return False
+    if not tool.check_markers:
+        return True
+
+    # 收集身份证据。POSIX 上 npm 用符号链接指向 `node_modules/<pkg>`,
+    # Windows 用 `.cmd` shim 内嵌包路径;远程脚本装出来的 launcher 是一小段
+    # shell 脚本,里面写死了真实入口路径——三种形态在下面统一处理。
+    evidence = [executable]
+    path = Path(executable)
+    try:
+        evidence.append(str(path.resolve()))
+    except OSError:
+        pass
+    try:
+        if path.stat().st_size <= _MARKER_CONTENT_LIMIT_BYTES:
+            evidence.append(path.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        pass
+    # 反斜杠归一为斜杠,让 `share/claude/versions/` 这类 marker 同时匹配
+    # POSIX 与 Windows 路径写法;casefold 处理大小写(例如 `AnthropicClaude`)。
+    combined = "\n".join(evidence).replace("\\", "/").casefold()
+    return any(marker.casefold() in combined for marker in tool.check_markers)
 
 
 def requires_backend_dependency(tool: ToolSpec, dependency: str) -> bool:
@@ -1287,6 +1331,25 @@ def _toml_upsert_root_key(lines: List[str], key: str, value: str) -> List[str]:
     return lines
 
 
+def _toml_escape_basic_string(value: str) -> str:
+    """Escape a value for use inside a TOML basic string ("...").
+
+    TOML basic strings share JSON-style escape rules: `\\`, `"`, control
+    characters and Unicode escapes. We only handle the ones a real
+    credential could contain (backslash, quote, and the common controls),
+    which is sufficient to prevent config-file corruption if a Key ever
+    contains an unexpected character.
+    """
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
 def _toml_upsert_section(
     lines: List[str], header: str, entries: Dict[str, object]
 ) -> List[str]:
@@ -1296,7 +1359,7 @@ def _toml_upsert_section(
             return f"{k} = {'true' if v else 'false'}"
         if isinstance(v, (int, float)):
             return f"{k} = {v}"
-        return f'{k} = "{v}"'
+        return f'{k} = "{_toml_escape_basic_string(str(v))}"'
 
     rendered_entries = [_render(k, v) for k, v in entries.items()]
     start = None
@@ -1472,13 +1535,16 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
     )
     lines = _normalize_blank_lines(lines)
     block: List[str] = ["", f"# {BRAND_NAME} models begin"]
+    api_key_toml = _toml_escape_basic_string(api_key)
     for model_id in get_model_ids(plan.key):
         display = _display_name(catalog, model_id)
+        # 每个字段都过一次 TOML 基本字符串转义:不预设 Tencent Key 的字符集,
+        # 万一 Key 里出现 `"` / `\`,配置文件不会被截断也不会注入新表头。
         block.append(f'[model."{model_id}"]')
-        block.append(f'model = "{model_id}"')
-        block.append(f'base_url = "{base_url}"')
-        block.append(f'name = "{display}"')
-        block.append(f'api_key = "{api_key}"')
+        block.append(f'model = "{_toml_escape_basic_string(model_id)}"')
+        block.append(f'base_url = "{_toml_escape_basic_string(base_url)}"')
+        block.append(f'name = "{_toml_escape_basic_string(display)}"')
+        block.append(f'api_key = "{api_key_toml}"')
         block.append("")
     block.append(f"# {BRAND_NAME} models end")
     lines = lines + block

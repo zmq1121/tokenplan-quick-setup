@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.7.3"
+VERSION = "2.7.6"
 
 # ── 品牌口径(集中定义;所有工具配置里用户可见的名称由此派生) ──────────────
 # 接入平台是腾讯云 TokenHub(端点域名/控制台口径)。2.5.x 及之前曾以
@@ -605,10 +605,15 @@ MODEL_CATALOG = {'personal-general': {'default': 'tc-code-latest',
                                   'GLM-5.2: glm-5.2',
                                   'GLM-5.3: glm-5.3',
                                   'Kimi-K2.7-Code: kimi-k2.7-code',
-                                  'MiniMax-M2.5: minimax-m2.5',
                                   '混元 Hy3: hy3',
-                                  '混元 Hy4-preview: hy4-preview']},
- 'personal-hy': {'default': 'hy3', 'display': ['Hy3: hy3', 'Hy4-preview: hy4-preview']},
+                                  '混元 Hy4-preview: hy4-preview',
+                                  '混元 Hy3-preview: hy3-preview',
+                                  '混元 Hy3-202608: hy3-202608']},
+ 'personal-hy': {'default': 'hy3',
+                 'display': ['Hy3: hy3',
+                             'Hy4-preview: hy4-preview',
+                             'Hy3-preview: hy3-preview',
+                             'Hy3-202608: hy3-202608']},
  'enterprise-pro': {'default': 'auto',
                     'display': ['Auto: auto',
                                 'GLM-5.3: glm-5.3',
@@ -619,8 +624,6 @@ MODEL_CATALOG = {'personal-general': {'default': 'tc-code-latest',
                                 'Kimi K2.7 Code: kimi-k2.7-code',
                                 'HighSpeed: kimi-k2.7-code-highspeed',
                                 'Kimi-K2.6: kimi-k2.6',
-                                'Kimi-K2.5: kimi-k2.5',
-                                'MiniMax-M2.5: minimax-m2.5',
                                 'MiniMax-M2.7: minimax-m2.7',
                                 'MiniMax-M3: minimax-m3',
                                 'DeepSeek-V4-Flash: deepseek-v4-flash',
@@ -684,6 +687,16 @@ class ToolSpec:
     name: str
     backend: str
     check_exe: Optional[str] = None
+    # 可执行文件名称可能冲突（例如通用的 `pi`、`hermes`、`codex`）。给出
+    # marker 后，检测器还会校验 symlink 目标、可执行文件路径与启动脚本
+    # 内容，只有其中之一含有指定子串才计入已安装。大小写不敏感。
+    check_markers: Tuple[str, ...] = field(default_factory=tuple)
+    # 桌面应用与官方 standalone 安装器通常没有 PATH 命令，或安装到与 npm 无关
+    # 的路径。声明常见安装位置后，检测器逐一 `Path.exists()`。
+    # 展开约定:`~` 与 `~user` 由 `expanduser` 处理；`${VAR}` / `$VAR` 由
+    # `os.path.expandvars` 处理——POSIX 上未定义的变量原样保留（例如 macOS
+    # 里的 `${LOCALAPPDATA}/...`），随后 `exists()` 判 False，安全跨平台。
+    install_paths: Tuple[str, ...] = field(default_factory=tuple)
     install_cmd: Optional[Union[tuple[str, ...], str]] = None
     install_cmd_win: Optional[Union[tuple[str, ...], str]] = None
     # 远程安装脚本(macOS/Linux):走 run_remote_script(下载+SHA256+确认),
@@ -803,7 +816,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         display_name="个人版 - Hy（混元）",
         base_url="https://api.lkeap.cloud.tencent.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key",
-        only_note="该套餐仅支持混元 Hy 系列模型: Hy3、Hy4-preview",
+        only_note="该套餐仅支持混元 Hy 系列模型",
     ),
     "3": PlanSpec(
         choice="3",
@@ -877,6 +890,19 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Hermes Agent",
         backend="cli",
         check_exe="hermes",
+        # `hermes` 命令在多个生态里重名(Python 库、消息队列客户端等)。上游 install.sh
+        # 装出来的 launcher 是一段 shell 脚本,内容形如
+        # `exec "$HOME/.hermes/hermes-agent/venv/bin/python" "$HOME/.hermes/hermes-agent/hermes"`,
+        # 因此以下 marker 命中的是我们真正想要的那个 Hermes(Nous Research)。
+        check_markers=(
+            ".hermes/hermes-agent",
+            "hermes-agent/venv",
+            "nousresearch",
+        ),
+        install_paths=(
+            "~/.hermes/hermes-agent",
+            "${LOCALAPPDATA}/hermes-agent",
+        ),
         start_hint="hermes",
         cfg_hint="~/.hermes/.env",
         install_script="https://hermes-agent.nousresearch.com/install.sh",
@@ -897,6 +923,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="CodeBuddy Code",
         backend="cli",
         check_exe="codebuddy",
+        check_markers=("@tencent-ai/codebuddy-code",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@tencent-ai/codebuddy-code")),
         start_hint="codebuddy",
         cfg_hint="~/.codebuddy/models.json",
@@ -912,6 +939,24 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Claude Code",
         backend="cli",
         check_exe="claude",
+        # 三种安装路径都要覆盖:
+        #   1) npm 全局:符号链接/`.cmd` shim 里含 `@anthropic-ai/claude-code`
+        #   2) POSIX standalone(Anthropic 官方 curl 脚本):
+        #      `~/.local/bin/claude` → `~/.local/share/claude/versions/<ver>`
+        #   3) Windows standalone / 桌面版:安装到 `%LOCALAPPDATA%\AnthropicClaude\`
+        #      或 `%LOCALAPPDATA%\Programs\Claude\`,路径与 exe 名都含 `anthropic`
+        # 大小写不敏感对比,`anthropic` 与 `AnthropicClaude` 都命中。
+        check_markers=(
+            "@anthropic-ai/claude-code",
+            "share/claude/versions/",
+            "anthropic",
+        ),
+        install_paths=(
+            "~/.local/share/claude/versions",
+            "${LOCALAPPDATA}/AnthropicClaude/claude.exe",
+            "${LOCALAPPDATA}/Programs/Claude/claude.exe",
+            "${APPDATA}/Claude/claude.exe",
+        ),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@anthropic-ai/claude-code")),
         start_hint="claude",
         cfg_hint="~/.claude/settings.json",
@@ -931,6 +976,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="OpenCode",
         backend="cli",
         check_exe="opencode",
+        check_markers=("opencode-ai",),
         start_hint="opencode",
         cfg_hint="~/.config/opencode/opencode.json",
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("opencode-ai")),
@@ -946,6 +992,12 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="OpenClaw",
         backend="cli",
         check_exe="openclaw",
+        # POSIX 走远程 install.sh 安装到 ~/.openclaw/bin/openclaw；Windows 走
+        # npm 全局包 openclaw。两条路径分别有独立 marker。
+        check_markers=(
+            "openclaw/bin/openclaw",
+            "node_modules/openclaw/",
+        ),
         start_hint="openclaw",
         cfg_hint="~/.openclaw/openclaw.json",
         install_script="https://openclaw.ai/install.sh",
@@ -966,6 +1018,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="DeepSeek Harness",
         backend="cli",
         check_exe="dsh",
+        # `dsh` 与 Debian 的分布式 shell 同名，必须校验属于 DeepSeek Harness。
+        check_markers=("@deepseek-ai/dsh",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@deepseek-ai/dsh")),
         start_hint="dsh web",
         cfg_hint="~/.dsh/settings.yaml",
@@ -982,6 +1036,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Codex CLI",
         backend="cli",
         check_exe="codex",
+        # 通用名 `codex` 有其他遗留工具（如 GNU codex）；用 npm 包身份消除歧义。
+        check_markers=("@openai/codex",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@openai/codex")),
         start_hint="codex",
         cfg_hint="~/.codex/config.toml",
@@ -998,6 +1054,14 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="WorkBuddy",
         backend="desktop",
         check_exe=None,
+        install_paths=(
+            "/Applications/WorkBuddy.app",
+            "/Applications/Tencent WorkBuddy.app",
+            "~/Applications/WorkBuddy.app",
+            "~/Applications/Tencent WorkBuddy.app",
+            "${LOCALAPPDATA}/Programs/WorkBuddy/WorkBuddy.exe",
+            "${LOCALAPPDATA}/Programs/Tencent WorkBuddy/WorkBuddy.exe",
+        ),
         download_url="https://workbuddy.qq.com",
         cfg_hint="~/.workbuddy/models.json",
         usage_lines=(
@@ -1012,6 +1076,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Kimi Code",
         backend="cli",
         check_exe="kimi",
+        check_markers=("@moonshot-ai/kimi-code",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@moonshot-ai/kimi-code")),
         start_hint="kimi",
         cfg_hint="~/.kimi-code/config.toml",
@@ -1027,6 +1092,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Grok CLI",
         backend="cli",
         check_exe="grok",
+        # `grok` 与 Splunk/日志抽取工具同名，必须校验属于 xAI Grok CLI。
+        check_markers=("@xai-official/grok",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@xai-official/grok")),
         start_hint="grok",
         cfg_hint="~/.grok/config.toml",
@@ -1041,6 +1108,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Pi",
         backend="cli",
         check_exe="pi",
+        check_markers=("@earendil-works/pi-coding-agent",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@earendil-works/pi-coding-agent")),
         start_hint="pi",
         cfg_hint="~/.pi/agent/models.json",
@@ -1055,6 +1123,11 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="ZCode",
         backend="desktop",
         check_exe=None,
+        install_paths=(
+            "/Applications/ZCode.app",
+            "~/Applications/ZCode.app",
+            "${LOCALAPPDATA}/Programs/ZCode/ZCode.exe",
+        ),
         download_url="https://zcode.ai",
         cfg_hint="~/.zcode/v2/config.json",
         usage_lines=(
@@ -1407,9 +1480,53 @@ def ensure_npm_bin_on_path() -> None:
     info(f"npm 全局命令路径已加入: {npm_bin}")
 
 
+# 读启动器/shim 内容作为身份证据。上限尽量宽,让 Windows 上偶尔出现的
+# Node SEA 或 Rust 启动器仍能贡献可搜索字符串;超出上限就只用路径证据。
+_MARKER_CONTENT_LIMIT_BYTES = 4 * 1024 * 1024
+
+
 def is_tool_installed(tool: ToolSpec) -> bool:
-    """Detect installation via executable on PATH."""
-    return bool(tool.check_exe and shutil.which(tool.check_exe))
+    """Detect a tool by known install path, then by CLI identity on PATH.
+
+    Detection order:
+      1. Any `install_paths` entry exists (桌面应用/官方 standalone 安装器,
+         `~` 与 `${VAR}` 均会展开;未定义的变量保留原样,`exists()` 判 False)。
+      2. `check_exe` 在 PATH 上找不到:视作未安装。
+      3. `check_exe` 命中且未声明 markers:信任命令名(仅对已知不重名的工具)。
+      4. 声明了 markers:必须命中至少一个,比对语料为 `executable` 路径、
+         `Path.resolve()` 解析路径,以及可读大小内的启动器/shim 文本内容。
+    """
+    if any(
+        Path(os.path.expandvars(path)).expanduser().exists()
+        for path in tool.install_paths
+    ):
+        return True
+    if not tool.check_exe:
+        return False
+    executable = shutil.which(tool.check_exe)
+    if not executable:
+        return False
+    if not tool.check_markers:
+        return True
+
+    # 收集身份证据。POSIX 上 npm 用符号链接指向 `node_modules/<pkg>`,
+    # Windows 用 `.cmd` shim 内嵌包路径;远程脚本装出来的 launcher 是一小段
+    # shell 脚本,里面写死了真实入口路径——三种形态在下面统一处理。
+    evidence = [executable]
+    path = Path(executable)
+    try:
+        evidence.append(str(path.resolve()))
+    except OSError:
+        pass
+    try:
+        if path.stat().st_size <= _MARKER_CONTENT_LIMIT_BYTES:
+            evidence.append(path.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        pass
+    # 反斜杠归一为斜杠,让 `share/claude/versions/` 这类 marker 同时匹配
+    # POSIX 与 Windows 路径写法;casefold 处理大小写(例如 `AnthropicClaude`)。
+    combined = "\n".join(evidence).replace("\\", "/").casefold()
+    return any(marker.casefold() in combined for marker in tool.check_markers)
 
 
 def requires_backend_dependency(tool: ToolSpec, dependency: str) -> bool:
@@ -2458,6 +2575,25 @@ def _toml_upsert_root_key(lines: List[str], key: str, value: str) -> List[str]:
     return lines
 
 
+def _toml_escape_basic_string(value: str) -> str:
+    """Escape a value for use inside a TOML basic string ("...").
+
+    TOML basic strings share JSON-style escape rules: `\\`, `"`, control
+    characters and Unicode escapes. We only handle the ones a real
+    credential could contain (backslash, quote, and the common controls),
+    which is sufficient to prevent config-file corruption if a Key ever
+    contains an unexpected character.
+    """
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
 def _toml_upsert_section(
     lines: List[str], header: str, entries: Dict[str, object]
 ) -> List[str]:
@@ -2467,7 +2603,7 @@ def _toml_upsert_section(
             return f"{k} = {'true' if v else 'false'}"
         if isinstance(v, (int, float)):
             return f"{k} = {v}"
-        return f'{k} = "{v}"'
+        return f'{k} = "{_toml_escape_basic_string(str(v))}"'
 
     rendered_entries = [_render(k, v) for k, v in entries.items()]
     start = None
@@ -2643,13 +2779,16 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
     )
     lines = _normalize_blank_lines(lines)
     block: List[str] = ["", f"# {BRAND_NAME} models begin"]
+    api_key_toml = _toml_escape_basic_string(api_key)
     for model_id in get_model_ids(plan.key):
         display = _display_name(catalog, model_id)
+        # 每个字段都过一次 TOML 基本字符串转义:不预设 Tencent Key 的字符集,
+        # 万一 Key 里出现 `"` / `\`,配置文件不会被截断也不会注入新表头。
         block.append(f'[model."{model_id}"]')
-        block.append(f'model = "{model_id}"')
-        block.append(f'base_url = "{base_url}"')
-        block.append(f'name = "{display}"')
-        block.append(f'api_key = "{api_key}"')
+        block.append(f'model = "{_toml_escape_basic_string(model_id)}"')
+        block.append(f'base_url = "{_toml_escape_basic_string(base_url)}"')
+        block.append(f'name = "{_toml_escape_basic_string(display)}"')
+        block.append(f'api_key = "{api_key_toml}"')
         block.append("")
     block.append(f"# {BRAND_NAME} models end")
     lines = lines + block
@@ -3536,9 +3675,15 @@ def verify_models(
     default_model = str(get_model_catalog(plan.key)["default"])
     if mode == "all":
         targets = catalog_ids or [default_model]
+        print("  ── 全量端到端验证（真实调用 /chat/completions） ──")
     else:
         targets = [default_model]
-    print("  ── 端到端验证（真实调用 /chat/completions） ──")
+        total = max(len(catalog_ids), 1)
+        print("  ── 默认模型抽样验证（真实调用 /chat/completions） ──")
+        info(
+            f"仅验证默认模型 1/{total}；其余模型未逐一调用"
+            "（全量验证请使用 --verify-models all）"
+        )
     print()
     results: Dict[str, Tuple[bool, str]] = {}
     for model in targets:
@@ -3552,8 +3697,11 @@ def verify_models(
     failed = [m for m, (p, _) in results.items() if not p]
     if failed:
         warn(f"{len(failed)} 个模型验证失败；配置仍已写入，请检查模型 ID 或套餐权限")
-    else:
+    elif mode == "all":
         ok(f"全部 {len(targets)} 个模型验证通过，配置立即可用")
+    else:
+        remaining = max(len(catalog_ids) - 1, 0)
+        ok(f"默认模型 {default_model} 验证通过；其余 {remaining} 个模型未逐一验证")
     print()
     return results
 

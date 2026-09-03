@@ -726,9 +726,15 @@ def verify_models(
     default_model = str(get_model_catalog(plan.key)["default"])
     if mode == "all":
         targets = catalog_ids or [default_model]
+        print("  ── 全量端到端验证（真实调用 /chat/completions） ──")
     else:
         targets = [default_model]
-    print("  ── 端到端验证（真实调用 /chat/completions） ──")
+        total = max(len(catalog_ids), 1)
+        print("  ── 默认模型抽样验证（真实调用 /chat/completions） ──")
+        info(
+            f"仅验证默认模型 1/{total}；其余模型未逐一调用"
+            "（全量验证请使用 --verify-models all）"
+        )
     print()
     results: Dict[str, Tuple[bool, str]] = {}
     for model in targets:
@@ -742,8 +748,11 @@ def verify_models(
     failed = [m for m, (p, _) in results.items() if not p]
     if failed:
         warn(f"{len(failed)} 个模型验证失败；配置仍已写入，请检查模型 ID 或套餐权限")
-    else:
+    elif mode == "all":
         ok(f"全部 {len(targets)} 个模型验证通过，配置立即可用")
+    else:
+        remaining = max(len(catalog_ids) - 1, 0)
+        ok(f"默认模型 {default_model} 验证通过；其余 {remaining} 个模型未逐一验证")
     print()
     return results
 

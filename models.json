@@ -1,5 +1,5 @@
 {
-  "latest_version": "2.7.3",
+  "latest_version": "2.7.6",
   "plans": {
     "personal-general": {
       "default": "tc-code-latest",
@@ -14,16 +14,19 @@
         "GLM-5.2: glm-5.2",
         "GLM-5.3: glm-5.3",
         "Kimi-K2.7-Code: kimi-k2.7-code",
-        "MiniMax-M2.5: minimax-m2.5",
         "混元 Hy3: hy3",
-        "混元 Hy4-preview: hy4-preview"
+        "混元 Hy4-preview: hy4-preview",
+        "混元 Hy3-preview: hy3-preview",
+        "混元 Hy3-202608: hy3-202608"
       ]
     },
     "personal-hy": {
       "default": "hy3",
       "display": [
         "Hy3: hy3",
-        "Hy4-preview: hy4-preview"
+        "Hy4-preview: hy4-preview",
+        "Hy3-preview: hy3-preview",
+        "Hy3-202608: hy3-202608"
       ]
     },
     "enterprise-pro": {
@@ -38,8 +41,6 @@
         "Kimi K2.7 Code: kimi-k2.7-code",
         "HighSpeed: kimi-k2.7-code-highspeed",
         "Kimi-K2.6: kimi-k2.6",
-        "Kimi-K2.5: kimi-k2.5",
-        "MiniMax-M2.5: minimax-m2.5",
         "MiniMax-M2.7: minimax-m2.7",
         "MiniMax-M3: minimax-m3",
         "DeepSeek-V4-Flash: deepseek-v4-flash",

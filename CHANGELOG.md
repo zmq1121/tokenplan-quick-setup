@@ -4,6 +4,71 @@
 
 ## [Unreleased]
 
+## [2.7.6] - 2026-09-04
+
+### 修复
+
+- Hermes 安装检测：`hermes` 命令与 Python 库、其它 CLI 撞名概率高，本轮补齐
+  `check_markers=('.hermes/hermes-agent', 'hermes-agent/venv', 'nousresearch')`
+  与跨平台 `install_paths`。真实的 Nous Research Hermes launcher 是一段
+  引用 `~/.hermes/hermes-agent/venv/…` 的 shell 脚本，marker 命中该内容
+- Claude Code Windows/桌面安装位置：新增 `install_paths` 覆盖
+  `%LOCALAPPDATA%\AnthropicClaude\`、`%LOCALAPPDATA%\Programs\Claude\`、
+  `%APPDATA%\Claude\`；`check_markers` 追加 `anthropic`（大小写不敏感），
+  让 Windows standalone 用户不再被误报为“未安装”
+- `install_paths` 展开语义在数据类的 docstring 里写明：`~` 走
+  `expanduser`，`${VAR}` 走 `expandvars`，POSIX 上未定义的变量原样保留、
+  `exists()` 判 False——因此 `${LOCALAPPDATA}/…` 在 macOS 上是安全 no-op
+- `is_tool_installed`：启动器/shim 内容读取上限由 128 KB 放宽到 4 MB，
+  兼容部分平台上的 Node SEA / Rust 启动器；仍严格失败关闭
+- 新增设计守护：`test_every_cli_tool_has_check_markers` 断言任何声明了
+  `check_exe` 的 CLI 工具必须同时声明 `check_markers`，防止未来注册工具
+  时再次遗漏
+
+### 模型目录(2026-09-04 官方文档对照更新)
+
+- 新增 `hy3-preview`、`hy3-202608`(个人版通用 + Hy 套餐):官方套餐页
+  Hy3 行的粘连 ID `hy3hy3-previewhy3-202608` 经消去法解析;`hy3-preview`
+  另经国际站后付费真 Key 实测可用
+- 移除 `minimax-m2.5`(个人版通用 + 企业专业)与 `kimi-k2.5`(企业专业):
+  官方两表均已不再列出
+- Hy 套餐 `only_note` 不再逐一列举家族成员("仅支持混元 Hy 系列模型"),
+  家族上新时提示文案不再过时
+- `scripts/check_models.py` 下线误报修复:通用套餐页同时含 Hy 套餐表,
+  此前 Hy 家族被误报"已不在官方表"。现新模型建议只看本套餐行,
+  下线判断看全页(同页任何表出现均为存活证据)
+- 测试去硬编码:`verify_models` 抽样文案与 WorkBuddy 落盘条数改为
+  跟随目录规模计算,目录再变更时不再需要同步改断言
+
+## [2.7.5] - 2026-09-04
+
+### 修复 / 加固
+
+- 全量工具安装身份校验：为 CodeBuddy Code、Claude Code、OpenCode、OpenClaw、
+  DeepSeek Harness、Codex CLI、Kimi Code、Grok CLI 补齐 `check_markers`，与
+  Pi 一致——同名命令必须命中对应 npm 包路径/`.cmd` wrapper 内容才计入
+  已安装。Claude Code 同时支持 npm 全局与官方 standalone 安装器两条路径
+- TOML 配置转义：`configure_grok` 与 `_toml_upsert_section` 现在通过
+  `_toml_escape_basic_string` 对 `api_key`/`base_url`/`display_name` 做严格
+  转义，即便 Key 中出现 `"` / `\` / 换行/回车/制表符，也不会截断字符串或
+  伪造出新的表头
+- 新增 33 例参数化安装检测测试与 3 例配置转义回归测试，覆盖每一个已注册
+  工具及 POSIX/Windows 两种 npm 布局；配套加了一条守护契约：任何未来注册
+  的工具必须至少给出 `check_exe` 或 `install_paths`，否则测试失败
+
+## [2.7.4] - 2026-09-04
+
+### 修复
+
+- 工具安装状态检测：WorkBuddy/ZCode 等桌面应用改为检查 macOS/Windows
+  的实际安装路径，不再因为没有 PATH 命令而恒定显示“未安装”
+- `pi` 命令增加软件包身份校验：同时检查 symlink 目标或 npm 启动器内容，
+  只有属于 `@earendil-works/pi-coding-agent` 才显示已安装，避免误命中其他
+  同名程序
+- 默认端到端验证明确标注为单模型抽样，并显示已验证/未逐一验证数量；仅在
+  `--verify-models all` 下使用“全量/全部模型验证”文案，避免把 1 次调用
+  误解为整个模型目录均已验证
+
 ## [2.7.3] - 2026-09-04
 
 ### 修复

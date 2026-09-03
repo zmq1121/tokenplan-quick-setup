@@ -130,16 +130,21 @@ def catalog_names(entry) -> list:
 def check_plan(plan_key: str, catalog: dict, report: dict) -> None:
     url, _anchor = DOC_PAGES[plan_key]
     page = fetch(url)
-    rows = parse_model_tables(page)
+    all_rows = parse_model_tables(page)
     if plan_key == "personal-hy":
-        rows = [r for r in rows if re.match(r"(?i)hy", r[0])]
+        rows = [r for r in all_rows if re.match(r"(?i)hy", r[0])]
     else:
-        rows = [r for r in rows if not re.match(r"(?i)hy\d", r[0])]
+        # 通用套餐页同时含 Hy 套餐表:新模型建议只看本套餐的行,
+        # 避免把 Hy 表的行误报成"通用套餐新模型"。
+        rows = [r for r in all_rows if not re.match(r"(?i)hy\d", r[0])]
     entry = catalog["plans"][plan_key]
     known_ids = catalog_ids(entry)
     known_names = catalog_names(entry)
 
-    all_official_ids = "".join(r[1] for r in rows)
+    # 下线判断看全页:同页其它套餐表(如通用套餐页里的 Hy 表)中出现
+    # 也是存活证据——Hy 家族在通用套餐可调用是 2.3.0 真枚举实测的,
+    # 只是通用套餐表本身不列它们,不能据此误报"已下线"。
+    all_official_ids = "".join(r[1] for r in all_rows)
     new_rows, removed_ids = [], []
 
     def name_tokens(text: str) -> set:

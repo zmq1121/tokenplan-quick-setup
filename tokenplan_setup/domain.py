@@ -26,6 +26,16 @@ class ToolSpec:
     name: str
     backend: str
     check_exe: Optional[str] = None
+    # 可执行文件名称可能冲突（例如通用的 `pi`、`hermes`、`codex`）。给出
+    # marker 后，检测器还会校验 symlink 目标、可执行文件路径与启动脚本
+    # 内容，只有其中之一含有指定子串才计入已安装。大小写不敏感。
+    check_markers: Tuple[str, ...] = field(default_factory=tuple)
+    # 桌面应用与官方 standalone 安装器通常没有 PATH 命令，或安装到与 npm 无关
+    # 的路径。声明常见安装位置后，检测器逐一 `Path.exists()`。
+    # 展开约定:`~` 与 `~user` 由 `expanduser` 处理；`${VAR}` / `$VAR` 由
+    # `os.path.expandvars` 处理——POSIX 上未定义的变量原样保留（例如 macOS
+    # 里的 `${LOCALAPPDATA}/...`），随后 `exists()` 判 False，安全跨平台。
+    install_paths: Tuple[str, ...] = field(default_factory=tuple)
     install_cmd: Optional[Union[tuple[str, ...], str]] = None
     install_cmd_win: Optional[Union[tuple[str, ...], str]] = None
     # 远程安装脚本(macOS/Linux):走 run_remote_script(下载+SHA256+确认),
@@ -145,7 +155,7 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
         display_name="个人版 - Hy（混元）",
         base_url="https://api.lkeap.cloud.tencent.com/plan/v3",
         key_url="https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key",
-        only_note="该套餐仅支持混元 Hy 系列模型: Hy3、Hy4-preview",
+        only_note="该套餐仅支持混元 Hy 系列模型",
     ),
     "3": PlanSpec(
         choice="3",
@@ -219,6 +229,19 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Hermes Agent",
         backend="cli",
         check_exe="hermes",
+        # `hermes` 命令在多个生态里重名(Python 库、消息队列客户端等)。上游 install.sh
+        # 装出来的 launcher 是一段 shell 脚本,内容形如
+        # `exec "$HOME/.hermes/hermes-agent/venv/bin/python" "$HOME/.hermes/hermes-agent/hermes"`,
+        # 因此以下 marker 命中的是我们真正想要的那个 Hermes(Nous Research)。
+        check_markers=(
+            ".hermes/hermes-agent",
+            "hermes-agent/venv",
+            "nousresearch",
+        ),
+        install_paths=(
+            "~/.hermes/hermes-agent",
+            "${LOCALAPPDATA}/hermes-agent",
+        ),
         start_hint="hermes",
         cfg_hint="~/.hermes/.env",
         install_script="https://hermes-agent.nousresearch.com/install.sh",
@@ -239,6 +262,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="CodeBuddy Code",
         backend="cli",
         check_exe="codebuddy",
+        check_markers=("@tencent-ai/codebuddy-code",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@tencent-ai/codebuddy-code")),
         start_hint="codebuddy",
         cfg_hint="~/.codebuddy/models.json",
@@ -254,6 +278,24 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Claude Code",
         backend="cli",
         check_exe="claude",
+        # 三种安装路径都要覆盖:
+        #   1) npm 全局:符号链接/`.cmd` shim 里含 `@anthropic-ai/claude-code`
+        #   2) POSIX standalone(Anthropic 官方 curl 脚本):
+        #      `~/.local/bin/claude` → `~/.local/share/claude/versions/<ver>`
+        #   3) Windows standalone / 桌面版:安装到 `%LOCALAPPDATA%\AnthropicClaude\`
+        #      或 `%LOCALAPPDATA%\Programs\Claude\`,路径与 exe 名都含 `anthropic`
+        # 大小写不敏感对比,`anthropic` 与 `AnthropicClaude` 都命中。
+        check_markers=(
+            "@anthropic-ai/claude-code",
+            "share/claude/versions/",
+            "anthropic",
+        ),
+        install_paths=(
+            "~/.local/share/claude/versions",
+            "${LOCALAPPDATA}/AnthropicClaude/claude.exe",
+            "${LOCALAPPDATA}/Programs/Claude/claude.exe",
+            "${APPDATA}/Claude/claude.exe",
+        ),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@anthropic-ai/claude-code")),
         start_hint="claude",
         cfg_hint="~/.claude/settings.json",
@@ -273,6 +315,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="OpenCode",
         backend="cli",
         check_exe="opencode",
+        check_markers=("opencode-ai",),
         start_hint="opencode",
         cfg_hint="~/.config/opencode/opencode.json",
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("opencode-ai")),
@@ -288,6 +331,12 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="OpenClaw",
         backend="cli",
         check_exe="openclaw",
+        # POSIX 走远程 install.sh 安装到 ~/.openclaw/bin/openclaw；Windows 走
+        # npm 全局包 openclaw。两条路径分别有独立 marker。
+        check_markers=(
+            "openclaw/bin/openclaw",
+            "node_modules/openclaw/",
+        ),
         start_hint="openclaw",
         cfg_hint="~/.openclaw/openclaw.json",
         install_script="https://openclaw.ai/install.sh",
@@ -308,6 +357,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="DeepSeek Harness",
         backend="cli",
         check_exe="dsh",
+        # `dsh` 与 Debian 的分布式 shell 同名，必须校验属于 DeepSeek Harness。
+        check_markers=("@deepseek-ai/dsh",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@deepseek-ai/dsh")),
         start_hint="dsh web",
         cfg_hint="~/.dsh/settings.yaml",
@@ -324,6 +375,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Codex CLI",
         backend="cli",
         check_exe="codex",
+        # 通用名 `codex` 有其他遗留工具（如 GNU codex）；用 npm 包身份消除歧义。
+        check_markers=("@openai/codex",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@openai/codex")),
         start_hint="codex",
         cfg_hint="~/.codex/config.toml",
@@ -340,6 +393,14 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="WorkBuddy",
         backend="desktop",
         check_exe=None,
+        install_paths=(
+            "/Applications/WorkBuddy.app",
+            "/Applications/Tencent WorkBuddy.app",
+            "~/Applications/WorkBuddy.app",
+            "~/Applications/Tencent WorkBuddy.app",
+            "${LOCALAPPDATA}/Programs/WorkBuddy/WorkBuddy.exe",
+            "${LOCALAPPDATA}/Programs/Tencent WorkBuddy/WorkBuddy.exe",
+        ),
         download_url="https://workbuddy.qq.com",
         cfg_hint="~/.workbuddy/models.json",
         usage_lines=(
@@ -354,6 +415,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Kimi Code",
         backend="cli",
         check_exe="kimi",
+        check_markers=("@moonshot-ai/kimi-code",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@moonshot-ai/kimi-code")),
         start_hint="kimi",
         cfg_hint="~/.kimi-code/config.toml",
@@ -369,6 +431,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Grok CLI",
         backend="cli",
         check_exe="grok",
+        # `grok` 与 Splunk/日志抽取工具同名，必须校验属于 xAI Grok CLI。
+        check_markers=("@xai-official/grok",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@xai-official/grok")),
         start_hint="grok",
         cfg_hint="~/.grok/config.toml",
@@ -383,6 +447,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Pi",
         backend="cli",
         check_exe="pi",
+        check_markers=("@earendil-works/pi-coding-agent",),
         install_cmd=("npm", "install", "-g", "--ignore-scripts", verified_npm_spec("@earendil-works/pi-coding-agent")),
         start_hint="pi",
         cfg_hint="~/.pi/agent/models.json",
@@ -397,6 +462,11 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="ZCode",
         backend="desktop",
         check_exe=None,
+        install_paths=(
+            "/Applications/ZCode.app",
+            "~/Applications/ZCode.app",
+            "${LOCALAPPDATA}/Programs/ZCode/ZCode.exe",
+        ),
         download_url="https://zcode.ai",
         cfg_hint="~/.zcode/v2/config.json",
         usage_lines=(

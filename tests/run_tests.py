@@ -1402,8 +1402,12 @@ def test_brand_migration():
           sorted(grouped) == sorted(p.key for p in mod.PLAN_CATALOG.values()))
 
     # subprocess 桩:挡掉 pgrep/reg query 等真实调用
+    # (stdout/stderr 必须有:Windows 上 get_npm_prefix_dir 经
+    #  check_output 取 .stdout,npm 在 CI 上存在会真走到这里)
     real_run = mod.subprocess.run
-    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+    mod.subprocess.run = lambda *a, **k: type(
+        "R", (), {"returncode": 1, "stdout": b"", "stderr": b""}
+    )()
 
     # Hermes: provider 键与展示名走 TokenHub(用户报告的问题点)
     with contextlib.redirect_stdout(buf):
@@ -1495,7 +1499,8 @@ def test_brand_migration():
     cs.parent.mkdir(parents=True, exist_ok=True)
     cs.write_text(json.dumps(
         {"tokenplan": {"provider": "anthropic"}}, ensure_ascii=False))
-    old_launcher = tmp / ".local" / "bin" / "claude-tokenplan"
+    ext = ".cmd" if mod.IS_WINDOWS else ""
+    old_launcher = tmp / ".local" / "bin" / f"claude-tokenplan{ext}"
     old_launcher.parent.mkdir(parents=True, exist_ok=True)
     old_launcher.write_text("#!/bin/sh\n")
     with contextlib.redirect_stdout(buf):
@@ -1505,7 +1510,7 @@ def test_brand_migration():
     check("claude: 新记账键写入", mod.BRAND_SLUG in cdata)
     check("claude: 旧启动器清理", not old_launcher.exists())
     check("claude: 新启动器就位",
-          (tmp / ".local" / "bin" / f"claude-{mod.BRAND_SLUG}").exists())
+          (tmp / ".local" / "bin" / f"claude-{mod.BRAND_SLUG}{ext}").exists())
     check("claude: 新模型文件",
           (tmp / ".claude" / f"{mod.BRAND_SLUG}-models.json").exists())
     check("claude: 旧模型文件清理",

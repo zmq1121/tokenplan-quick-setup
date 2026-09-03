@@ -2,6 +2,48 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.6.0] - 2026-09-03
+
+### 品牌口径统一:TokenHub(修复用户可见的名称错位)
+
+**① 工具内显示名与 provider 键全部收敛为 TokenHub**
+
+接入平台是腾讯云 TokenHub(端点域名/控制台口径),但 2.5.x 写入各工具的
+provider 名称是安装器内部名("Token Plan"/`tokenplan`/`token-plan`/
+`tencent-tokenplan`)——用户在 Hermes 等工具里看到的是与所接入平台无关的
+名称。现在集中由四个常量派生(`BRAND_NAME`/`BRAND_SLUG`/`BRAND_VENDOR`/
+`BRAND_LEGACY_KEYS`),12 个工具的配置全部迁移:provider 键 `tokenhub`、
+展示名 TokenHub、模型前缀 `tokenhub/<model>`;Claude 的启动器命令更名为
+`claude-tokenhub`,模型文件更名为 `tokenhub-models.json`。
+
+**② 旧品牌配置平滑升级**
+
+- 各 configurator 重写配置时自动摘除 2.5.x 旧键(JSON 逐键 pop、TOML 按
+  段删除、Grok 按托管块剥离、Claude 旧启动器/旧模型文件清理),不会出现
+  两套 provider 并存
+- `doctor` 的 `probe_config` 对旧品牌特征同样返回"配置有效"(旧配置仍能
+  正常工作,不误报缺失);重跑一次 repair 即完成品牌升级
+- 刻意保留:rc 文件 marker、`TOKENPLAN_API_KEY` 环境变量名、npm 包名
+  `tokenplan-setup`(避免破坏已发布文档与用户 shell 配置)
+
+### 交互展现优化
+
+- **修复套餐选择提示范围写死**:菜单有 9 个套餐但提示写"请输入数字 (1-4)"
+  ——改为按 `PLAN_CATALOG` 动态生成(运行模式菜单同样处理)
+- **套餐菜单分组**:按"套餐版(包月)/ 国际站(新加坡)/ 后付费(按量计费)"
+  三组展示;模型受限的套餐(Hy 仅 Hy3、轻享仅 Auto)在菜单行内就地提示
+- **工具菜单加实时状态列**:逐工具显示"✓ 已安装 / · 未安装"与
+  "可自动安装 / 需手动下载",选择前即可判断
+- **横幅 CJK 对齐**:新增 `print_banner()`/`display_width()`,按终端显示
+  宽度(全角算 2 列)居中与补位,中文标题下右边框不再漂移;列表列对齐
+  同样按显示宽度计算
+
+### 测试
+
+新增 `brand-migration` 测试组:品牌常量自洽、套餐分组全覆盖、各工具旧键
+摘除与用户配置保留、probe 旧品牌兼容、动态提示范围、菜单状态列、横幅
+对齐;回归总数 229 → 270。
+
 ## [2.5.0] - 2026-09-03
 
 ### 安全与规范性(对齐官方 tokenhub-cli 的工程标准)

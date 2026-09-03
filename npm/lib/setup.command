@@ -1,7 +1,7 @@
 #!/bin/bash
 "exec" "python3" "$0" "$@"
 # -*- coding: utf-8 -*-
-# 腾讯云 Token Plan — 小白一键接入
+# 腾讯云 TokenHub — 小白一键接入
 # Mac: 终端运行 | Windows: 右键→Python 打开
 import argparse
 import contextlib
@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,7 +25,18 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.5.0"
+VERSION = "2.6.0"
+
+# ── 品牌口径(集中定义;所有工具配置里用户可见的名称由此派生) ──────────────
+# 接入平台是腾讯云 TokenHub(端点域名/控制台口径)。2.5.x 及之前曾以
+# "Token Plan"/"tokenplan"/"token-plan"/"tencent-tokenplan" 作为展示名,
+# 与所接入平台不一致,已统一收敛为 TokenHub;旧键在各 configurator
+# 重写时自动摘除(见 BRAND_LEGACY_KEYS),doctor 对旧品牌配置不误报。
+BRAND_NAME = "TokenHub"                  # 展示名(横幅 / provider name / displayName)
+BRAND_SLUG = "tokenhub"                  # 配置内 provider 键与模型前缀(tokenhub/<model>)
+BRAND_VENDOR = "Tencent Cloud TokenHub"  # vendor/name 全称(WorkBuddy/ZCode/Codex/OpenCode)
+# 环境变量名 TOKENPLAN_API_KEY 保留不变:已发布文档与用户 shell 配置依赖它
+BRAND_LEGACY_KEYS = ("tokenplan", "token-plan", "tencent-tokenplan")  # 旧 provider 键,重写时摘除
 
 # 退出码契约(对齐 thcli 的纪律:失败路径必须非 0 且错误进提示区,
 # 脚本/CI 无需解析随语言变化的文案即可判断成败):
@@ -39,6 +51,7 @@ YELLOW = "\033[33m"
 CYAN = "\033[36m"
 BLUE = "\033[34m"
 WHITE = "\033[37m"
+DIM = "\033[2m"
 
 BACKUP_DIR = HOME / ".tokenplan-backups"
 DEFAULT_TIMEOUT = 10
@@ -52,6 +65,27 @@ IS_WINDOWS = sys.platform == "win32"
 _JSON_MODE = False
 # --yes:跳过远程脚本执行确认(来源与 SHA256 仍会完整打印)
 _ASSUME_YES = False
+
+
+def display_width(text: str) -> int:
+    """终端显示宽度(CJK 全角按 2 列),用于中英文混排的列对齐。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def pad_display(text: str, width: int) -> str:
+    """按显示宽度右补空格:与 str.ljust 不同,中文按 2 列计算。"""
+    return text + " " * max(0, width - display_width(text))
+
+
+def print_banner(*lines: str) -> None:
+    """统一横幅:按显示宽度居中,保证中文标题下右边框也对齐。"""
+    width = 46
+    print("  ╔" + "═" * width + "╗")
+    for line in lines:
+        pad = width - display_width(line)
+        left = pad // 2
+        print("  ║" + " " * left + line + " " * (pad - left) + "║")
+    print("  ╚" + "═" * width + "╝")
 
 
 def clear() -> None:
@@ -160,7 +194,7 @@ def enable_windows_ansi() -> None:
 
 @dataclass(frozen=True)
 class PlanSpec:
-    """A Token Plan product tier: display info plus its API base URL and key console URL."""
+    """A TokenHub product tier: display info plus its API base URL and key console URL."""
 
     choice: str
     key: str
@@ -727,6 +761,14 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
     ),
 }
 
+# 套餐分组(菜单展示用):组标题 -> 组内套餐 key 顺序,必须覆盖全部套餐
+PLAN_GROUPS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("套餐版（包月）", ("personal-general", "personal-hy", "enterprise-pro", "enterprise-light")),
+    ("国际站（新加坡）", ("intl-personal", "intl-enterprise-pro", "intl-enterprise-light")),
+    ("后付费（按量计费）", ("postpaid", "postpaid-intl")),
+)
+PLAN_BY_KEY = {item.key: item for item in PLAN_CATALOG.values()}
+
 
 TOOLS: Tuple[ToolSpec, ...] = (
     ToolSpec(
@@ -759,7 +801,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         cfg_hint="~/.codebuddy/models.json",
         usage_lines=(
             "终端输入: codebuddy",
-            "Token Plan 使用 API Key，无需腾讯账号网页登录",
+            f"{BRAND_NAME} 使用 API Key，无需腾讯账号网页登录",
             "如果新窗口提示 command not found，请先执行: source ~/.zshrc",
             "输入 /model 切换模型",
         ),
@@ -775,9 +817,9 @@ TOOLS: Tuple[ToolSpec, ...] = (
         usage_lines=(
             "终端输入: claude",
             "切换模型: claude --model <模型ID>",
-            "完整模型选择器: claude-tokenplan",
-            "重要: Claude 内置 /model 只显示固定槽位，不能显示全部 Token Plan 模型",
-            "其它模型请用 claude --model <模型ID>，或运行 claude-tokenplan 选择",
+            f"完整模型选择器: claude-{BRAND_SLUG}",
+            f"重要: Claude 内置 /model 只显示固定槽位，不能显示全部 {BRAND_NAME} 模型",
+            f"其它模型请用 claude --model <模型ID>，或运行 claude-{BRAND_SLUG} 选择",
             "glm-5.3 始终思考：已启用 Thinking mode，并默认使用 high effort",
             "模型与强度需分别执行：先提交 /model <模型ID>，成功后再单独提交 /effort low|high|max",
             "不要一次粘贴两行，也不要使用 /model <模型ID> low；它们都会被当成模型 ID",
@@ -795,7 +837,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
             "终端输入: opencode",
             "项目初始化: 在 OpenCode 中输入 /init",
             "切换模型: 输入 /models",
-            "Token Plan 使用 OpenAI-compatible Chat Completions 端点",
+            f"{BRAND_NAME} 使用 OpenAI-compatible Chat Completions 端点",
         ),
     ),
     ToolSpec(
@@ -812,10 +854,10 @@ TOOLS: Tuple[ToolSpec, ...] = (
         usage_lines=(
             "终端输入: openclaw",
             "检查配置: openclaw config validate",
-            "仅看套餐模型: openclaw models list --provider tencent-tokenplan",
-            "切换模型: openclaw models set tencent-tokenplan/<模型ID>",
-            "不要运行 /auth tencent-token-plan；该名称不是本安装器配置的 Provider",
-            "Token Plan 使用 API Key，无需 ChatGPT 或其他网页登录",
+            f"仅看套餐模型: openclaw models list --provider {BRAND_SLUG}",
+            f"切换模型: openclaw models set {BRAND_SLUG}/<模型ID>",
+            "不要运行 /auth tencent-token-plan（openclaw 内置条目，非本安装器配置的 Provider）",
+            f"{BRAND_NAME} 使用 API Key，无需 ChatGPT 或其他网页登录",
         ),
     ),
     ToolSpec(
@@ -860,7 +902,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         usage_lines=(
             "下载安装: https://workbuddy.qq.com（腾讯云 AI 桌面智能体）",
             "模型配置: 安装器已自动写入当前套餐全部模型到 ~/.workbuddy/models.json",
-            "打开 WorkBuddy → 模型选择,即可看到 TokenPlan 开头的模型",
+            f"打开 WorkBuddy → 模型选择,即可看到 {BRAND_NAME} 开头的模型",
             "如需手动添加: 设置 → 模型/服务商,Base URL: {base_url}",
         ),
     ),
@@ -874,7 +916,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         cfg_hint="~/.kimi-code/config.toml",
         usage_lines=(
             "终端输入: kimi",
-            "安装器已写入 tokenplan provider 与套餐模型(config.toml),默认模型已设为套餐默认",
+            f"安装器已写入 {BRAND_SLUG} provider 与套餐模型(config.toml),默认模型已设为套餐默认",
             "切换模型: 会话内 /model,或 kimi -m <模型别名>",
             "配置文件: ~/.kimi-code/config.toml",
         ),
@@ -903,8 +945,8 @@ TOOLS: Tuple[ToolSpec, ...] = (
         cfg_hint="~/.pi/agent/models.json",
         usage_lines=(
             "终端输入: pi",
-            "安装器已写入 tokenplan provider 与套餐模型(models.json)",
-            "切换模型: 会话内 /model,或 pi --model tokenplan/<模型>",
+            f"安装器已写入 {BRAND_SLUG} provider 与套餐模型(models.json)",
+            f"切换模型: 会话内 /model,或 pi --model {BRAND_SLUG}/<模型>",
         ),
     ),
     ToolSpec(
@@ -917,7 +959,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         usage_lines=(
             "下载安装: https://zcode.ai(智谱 ZCode 客户端)",
             "安装器已写入自定义 provider 与套餐模型到 ~/.zcode/v2/config.json",
-            "启动 ZCode 后在模型选择中使用 Tencent Cloud Token Plan 条目",
+            f"启动 ZCode 后在模型选择中使用 {BRAND_VENDOR} 条目",
             "该客户端为闭源应用,配置写入未经官方端到端验证,如异常请在应用内手动添加",
         ),
     ),
@@ -1039,12 +1081,13 @@ def install_codebuddy_shell_env(api_key: str, base_url: str) -> None:
     os.environ["OPENAI_BASE_URL"] = base_url
 
 
-def install_claude_tokenplan_path() -> None:
-    """Expose the full Token Plan model selector in future shells."""
+def install_claude_tokenhub_path() -> None:
+    """Expose the full TokenHub model selector in future shells."""
     launcher_dir = cfg_path(".local", "bin")
     launcher_dir.mkdir(parents=True, exist_ok=True)
     shell = os.environ.get("SHELL", "")
     rc_path = HOME / (".zshrc" if shell.endswith("/zsh") else ".bashrc")
+    # marker 文案保持不变:换词会让升级用户得到重复的 PATH 块
     marker = "# Token Plan Claude model selector"
     existing = rc_path.read_text() if rc_path.exists() else ""
     path_line = f'export PATH="{launcher_dir}:$PATH"'
@@ -1052,21 +1095,21 @@ def install_claude_tokenplan_path() -> None:
         rc_path.parent.mkdir(parents=True, exist_ok=True)
         rc_path.write_text(existing.rstrip() + f"\n{marker}\n{path_line}\n")
         record_state("rc_blocks", {"file": str(rc_path), "marker": marker})
-    record_state("files_written", str(launcher_dir / "claude-tokenplan"))
+    record_state("files_written", str(launcher_dir / "claude-tokenhub"))
     current_path = os.environ.get("PATH", "")
     if str(launcher_dir) not in current_path.split(":"):
         os.environ["PATH"] = f"{launcher_dir}:{current_path}"
 
 
-def _claude_tokenplan_cmd(model_ids: List[str]) -> str:
-    """Render a Windows batch launcher for the Token Plan model selector."""
+def _claude_tokenhub_cmd(model_ids: List[str]) -> str:
+    """Render a Windows batch launcher for the TokenHub model selector."""
     models = " ".join(model_ids)
     lines = [
         "@echo off",
         "chcp 65001 >nul",
         "setlocal enabledelayedexpansion",
         f"set MODELS={models}",
-        "echo Token Plan models:",
+        f"echo {BRAND_NAME} models:",
         "set /a IDX=0",
         "for %%M in (%MODELS%) do (",
         "  set /a IDX+=1",
@@ -1089,14 +1132,21 @@ def _claude_tokenplan_cmd(model_ids: List[str]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def install_claude_tokenplan_launcher_win(model_ids: List[str]) -> None:
-    """Write claude-tokenplan.cmd into the npm global dir (already on PATH)."""
+def install_claude_tokenhub_launcher_win(model_ids: List[str]) -> None:
+    """Write claude-tokenhub.cmd into the npm global dir (already on PATH)."""
     prefix = get_npm_prefix_dir()
     target_dir = prefix if prefix and prefix.is_dir() else cfg_path(".local", "bin")
     target_dir.mkdir(parents=True, exist_ok=True)
-    launcher = target_dir / "claude-tokenplan.cmd"
-    launcher.write_text(_claude_tokenplan_cmd(model_ids), encoding="utf-8")
+    launcher = target_dir / "claude-tokenhub.cmd"
+    launcher.write_text(_claude_tokenhub_cmd(model_ids), encoding="utf-8")
     record_state("files_written", str(launcher))
+    # 2.5.x 的旧启动器一并清掉,避免两套命令并存
+    legacy = target_dir / "claude-tokenplan.cmd"
+    if legacy.exists():
+        try:
+            legacy.unlink()
+        except OSError:
+            pass
     if prefix:
         info(f"已写入模型选择器: {launcher}")
     else:
@@ -1597,7 +1647,7 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
                 {
                     "id": model_id,
                     "name": model_id,
-                    "vendor": "Tencent Cloud",
+                    "vendor": BRAND_VENDOR,
                     "apiKey": api_key,
                     "url": base_url,
                 }
@@ -1625,7 +1675,7 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
 
 
 def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
-    """Write ~/.claude/settings.json env block + model slots + tokenplan launcher."""
+    """Write ~/.claude/settings.json env block + model slots + tokenhub launcher."""
     if base_url.rstrip("/").endswith("/v1"):
         # 后付费(tokenhub /v1):Anthropic SDK 硬拼 /v1/messages,
         # base 必须写到域名根(不带 /v1),否则会请求 /v1/v1/messages → 404
@@ -1673,7 +1723,7 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
             "env": env,
             "model": default_model,
             "alwaysThinkingEnabled": True,
-            "tokenplan": {
+            BRAND_SLUG: {
                 "provider": "anthropic",
                 "base_url": anthropic_url,
                 "models": model_ids,
@@ -1681,8 +1731,17 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
         },
         merge=True,
     )
+    # 摘除 2.5.x 的旧记账键(仅是安装器的记录块,不影响 Claude 读取)
+    settings_path = cfg_path(".claude", "settings.json")
+    settings_data = _read_json_object(settings_path)
+    if any(k in settings_data for k in BRAND_LEGACY_KEYS):
+        for legacy in BRAND_LEGACY_KEYS:
+            settings_data.pop(legacy, None)
+        settings_path.write_text(
+            json.dumps(settings_data, indent=2, ensure_ascii=False) + "\n"
+        )
     write_json(
-        cfg_path(".claude", "tokenplan-models.json"),
+        cfg_path(".claude", f"{BRAND_SLUG}-models.json"),
         {
             "provider": "anthropic",
             "base_url": anthropic_url,
@@ -1690,14 +1749,28 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
             "default": default_model,
         },
     )
+    # 2.5.x 的旧模型文件/旧启动器清理,避免用户看到两套
+    legacy_models = cfg_path(".claude", "tokenplan-models.json")
+    if legacy_models.exists():
+        try:
+            legacy_models.unlink()
+        except OSError:
+            pass
+    legacy_launcher = cfg_path(".local", "bin", "claude-tokenplan")
+    if legacy_launcher.exists():
+        try:
+            legacy_launcher.unlink()
+        except OSError:
+            pass
     if IS_WINDOWS:
-        install_claude_tokenplan_launcher_win(model_ids)
+        install_claude_tokenhub_launcher_win(model_ids)
         return
-    launcher = cfg_path(".local", "bin", "claude-tokenplan")
+    install_claude_tokenhub_path()
+    launcher = cfg_path(".local", "bin", "claude-tokenhub")
     launcher.write_text(
         "#!/bin/sh\n"
         f"models={' '.join(model_ids)!r}\n"
-        "printf 'Token Plan 模型列表:\\n'\n"
+        f"printf '{BRAND_NAME} 模型列表:\\n'\n"
         "i=1; for model in $models; do printf '  %s. %s\\n' \"$i\" \"$model\"; i=$((i + 1)); done\n"
         "printf '请选择序号或输入完整模型 ID: '\n"
         "read -r choice\n"
@@ -1709,7 +1782,6 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
         "CLAUDE_CODE_EFFORT_LEVEL=\"${CLAUDE_CODE_EFFORT_LEVEL:-high}\" exec claude --model \"$model\" \"$@\"\n"
     )
     launcher.chmod(0o755)
-    install_claude_tokenplan_path()
 
 
 def patch_hermes_model_routing() -> None:
@@ -1746,19 +1818,19 @@ def configure_hermes(base_url: str, api_key: str, plan: PlanSpec) -> None:
     config_path.write_text(
         "model:\n"
         f"  default: {default_model}\n"
-        "  provider: token-plan\n"
+        f"  provider: {BRAND_SLUG}\n"
         f"  base_url: {base_url}\n"
         "  api_key: ${OPENAI_API_KEY}\n"
         "providers:\n"
-        "  token-plan:\n"
-        "    name: Token Plan\n"
+        f"  {BRAND_SLUG}:\n"
+        f"    name: {BRAND_NAME}\n"
         f"    api: {base_url}\n"
         "    api_key: ${OPENAI_API_KEY}\n"
         f"    default_model: {default_model}\n"
         "    discover_models: false\n"
         f"    models: {{{model_entries}}}\n"
     )
-    info("Hermes 已配置为 Token Plan custom 端点")
+    info(f"Hermes 已配置为 {BRAND_NAME} custom 端点")
     info(f"当前产品线: {plan.display_name}")
     info(f"已写入模型数量: {len(models)}")
     info(f"默认模型: {default_model}")
@@ -1778,20 +1850,50 @@ def get_openai_compatible_default_model(plan_key: str) -> str:
     )
 
 
+def _purge_openclaw_legacy(config_path: Path) -> None:
+    """摘除 2.5.x 旧品牌键(tencent-tokenplan provider 及 agents 里的模型引用)。"""
+    data = _read_json_object(config_path)
+    changed = False
+    models = data.get("models")
+    if isinstance(models, dict):
+        providers = models.get("providers")
+        if isinstance(providers, dict):
+            for legacy in BRAND_LEGACY_KEYS:
+                if legacy in providers:
+                    providers.pop(legacy)
+                    changed = True
+    agents = data.get("agents")
+    if isinstance(agents, dict):
+        defaults = agents.get("defaults")
+        if isinstance(defaults, dict):
+            entries = defaults.get("models")
+            if isinstance(entries, dict):
+                stale = [
+                    key for key in entries
+                    if isinstance(key, str)
+                    and any(key.startswith(f"{legacy}/") for legacy in BRAND_LEGACY_KEYS)
+                ]
+                for key in stale:
+                    entries.pop(key)
+                    changed = True
+    if changed:
+        config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
 def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Write ~/.openclaw/openclaw.json provider and .env key."""
     model_ids = get_model_ids(plan.key)
     default_model = get_openai_compatible_default_model(plan.key)
     config_path = cfg_path(".openclaw", "openclaw.json")
     write_env(cfg_path(".openclaw", ".env"), TOKENPLAN_API_KEY=api_key)
-    full_model_ids = [f"tencent-tokenplan/{model_id}" for model_id in model_ids]
+    full_model_ids = [f"{BRAND_SLUG}/{model_id}" for model_id in model_ids]
     write_json(
         config_path,
         {
             "models": {
                 "mode": "merge",
                 "providers": {
-                    "tencent-tokenplan": {
+                    BRAND_SLUG: {
                         "baseUrl": base_url,
                         "apiKey": "${TOKENPLAN_API_KEY}",
                         "api": "openai-completions",
@@ -1808,7 +1910,7 @@ def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
             },
             "agents": {
                 "defaults": {
-                    "model": {"primary": f"tencent-tokenplan/{default_model}"},
+                    "model": {"primary": f"{BRAND_SLUG}/{default_model}"},
                     "models": {
                         full_model_id: {
                             "alias": full_model_id.split("/", 1)[1],
@@ -1821,7 +1923,8 @@ def configure_openclaw(base_url: str, api_key: str, plan: PlanSpec) -> None:
         },
         merge=True,
     )
-    info("OpenClaw 已写入 Token Plan 自定义 Provider")
+    _purge_openclaw_legacy(config_path)
+    info(f"OpenClaw 已写入 {BRAND_NAME} 自定义 Provider")
 
 
 def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
@@ -1834,11 +1937,11 @@ def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
         config_path,
         {
             "$schema": "https://opencode.ai/config.json",
-            "model": f"tokenplan/{default_model}",
+            "model": f"{BRAND_SLUG}/{default_model}",
             "provider": {
-                "tokenplan": {
+                BRAND_SLUG: {
                     "npm": "@ai-sdk/openai-compatible",
-                    "name": "Tencent Cloud Token Plan",
+                    "name": BRAND_VENDOR,
                     "options": {
                         "baseURL": base_url,
                         "apiKey": api_key,
@@ -1852,7 +1955,14 @@ def configure_opencode(base_url: str, api_key: str, plan: PlanSpec) -> None:
         },
         merge=True,
     )
-    info("OpenCode 已写入 Token Plan 自定义 Provider")
+    # 摘除 2.5.x 的旧 provider 键,避免模型列表里出现两套来源
+    data = _read_json_object(config_path)
+    provider = data.get("provider")
+    if isinstance(provider, dict) and any(k in provider for k in BRAND_LEGACY_KEYS):
+        for legacy in BRAND_LEGACY_KEYS:
+            provider.pop(legacy, None)
+        config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    info(f"OpenCode 已写入 {BRAND_NAME} 自定义 Provider")
 
 
 def _workbuddy_model_entry(
@@ -1873,8 +1983,8 @@ def _workbuddy_model_entry(
     multimodal = "vision" in model_id.lower()
     return {
         "id": model_id,
-        "name": f"TokenPlan{plan_short} / {friendly or model_id}",
-        "vendor": "Tencent Cloud Token Plan",
+        "name": f"{BRAND_NAME} {plan_short} / {friendly or model_id}",
+        "vendor": BRAND_VENDOR,
         "url": f"{base_url}/chat/completions",
         "apiKey": api_key,
         "supportsToolCall": True,
@@ -1935,15 +2045,15 @@ def configure_dsh(base_url: str, api_key: str, plan: PlanSpec) -> None:
     settings_path.write_text(
         "llm-pi-ai:\n"
         "  providers:\n"
-        "    tokenplan:\n"
-        "      displayName: Tencent Cloud Token Plan\n"
+        f"    {BRAND_SLUG}:\n"
+        f"      displayName: {BRAND_NAME}\n"
         "      apiKeyEnv: TOKENPLAN_API_KEY\n"
         "      api: openai-completions\n"
         f"      baseURL: {base_url}\n"
         "      models:\n"
         f"{model_entries}\n"
         "agent-default-model:\n"
-        "  provider: tokenplan\n"
+        f"  provider: {BRAND_SLUG}\n"
         f"  model: {get_model_catalog(plan.key)['default']}\n"
     )
     backup_file(credentials_path)
@@ -2147,13 +2257,17 @@ def configure_codex(base_url: str, api_key: str, plan: PlanSpec) -> None:
         config_path.read_text().splitlines() if config_path.exists() else []
     )
     backup_file(config_path)
-    lines = _toml_upsert_root_key(existing_lines, "model_provider", "tokenplan")
+    lines = _toml_upsert_root_key(existing_lines, "model_provider", BRAND_SLUG)
     lines = _toml_upsert_root_key(lines, "model", default_model)
+    # 摘除 2.5.x 旧 provider 段,避免残留一个失效的 tokenplan 入口
+    lines = _toml_remove_sections(
+        lines, {f"model_providers.{legacy}" for legacy in BRAND_LEGACY_KEYS}
+    )
     lines = _toml_upsert_section(
         lines,
-        "[model_providers.tokenplan]",
+        f"[model_providers.{BRAND_SLUG}]",
         {
-            "name": "Tencent Cloud Token Plan",
+            "name": BRAND_VENDOR,
             "base_url": base_url,
             "wire_api": wire_api,
             "env_key": "TOKENPLAN_API_KEY",
@@ -2181,7 +2295,7 @@ def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     appear BEFORE any [table] header (TOML rule); [providers.<id>] carries
     type/base_url/api_key; [models.<id>] requires provider + model +
     max_context_size (display_name optional). Verified end-to-end against
-    the Token Plan chat-completions endpoint.
+    the TokenHub chat-completions endpoint.
     """
     home = _kimi_home()
     home.mkdir(parents=True, exist_ok=True)
@@ -2194,11 +2308,15 @@ def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     default_model = str(catalog["default"])
     managed = {f"models.{m}" for m in get_model_ids(plan.key)}
     lines = _toml_remove_sections(existing_lines, managed)
-    lines = _toml_upsert_root_key(lines, "default_provider", "tokenplan")
+    # 摘除 2.5.x 旧 provider 段(其 model 段已随 managed 集合重写)
+    lines = _toml_remove_sections(
+        lines, {f"providers.{legacy}" for legacy in BRAND_LEGACY_KEYS}
+    )
+    lines = _toml_upsert_root_key(lines, "default_provider", BRAND_SLUG)
     lines = _toml_upsert_root_key(lines, "default_model", default_model)
     lines = _toml_upsert_section(
         lines,
-        "[providers.tokenplan]",
+        f"[providers.{BRAND_SLUG}]",
         {
             "type": "openai",
             "base_url": base_url,
@@ -2213,7 +2331,7 @@ def configure_kimi(base_url: str, api_key: str, plan: PlanSpec) -> None:
             lines,
             f'[models."{model_id}"]',
             {
-                "provider": "tokenplan",
+                "provider": BRAND_SLUG,
                 "model": model_id,
                 "display_name": display,
                 "max_context_size": 128000,
@@ -2233,7 +2351,7 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Configure Grok CLI (~/.grok/config.toml) custom models.
 
     Grok models are flat [model.<id>] tables; api_backend defaults to
-    chat_completions, which Token Plan exposes on every site. Verified
+    chat_completions, which TokenHub exposes on every site. Verified
     end-to-end: grok sent requests to <base_url>/chat/completions.
     """
     home = _grok_home()
@@ -2242,9 +2360,14 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
     existing = config_path.read_text() if config_path.exists() else ""
     backup_file(config_path)
     catalog = get_model_catalog(plan.key)
-    # 移除旧的 tokenplan 托管块(模型集合可能变化),再重写
-    lines = _strip_managed_block(existing.splitlines(), "# Token Plan models begin", "# Token Plan models end")
-    block: List[str] = ["", "# Token Plan models begin"]
+    # 移除旧的托管块(模型集合可能变化),再重写;2.5.x 的旧品牌标记也一并剥离
+    lines = _strip_managed_block(
+        existing.splitlines(), "# Token Plan models begin", "# Token Plan models end"
+    )
+    lines = _strip_managed_block(
+        lines, f"# {BRAND_NAME} models begin", f"# {BRAND_NAME} models end"
+    )
+    block: List[str] = ["", f"# {BRAND_NAME} models begin"]
     for model_id in get_model_ids(plan.key):
         display = _display_name(catalog, model_id)
         block.append(f'[model."{model_id}"]')
@@ -2253,7 +2376,7 @@ def configure_grok(base_url: str, api_key: str, plan: PlanSpec) -> None:
         block.append(f'name = "{display}"')
         block.append(f'api_key = "{api_key}"')
         block.append("")
-    block.append("# Token Plan models end")
+    block.append(f"# {BRAND_NAME} models end")
     lines = lines + block
     config_path.write_text("\n".join(lines).rstrip() + "\n")
     _harden(config_path)
@@ -2272,9 +2395,9 @@ def _pi_agent_dir() -> Path:
 def configure_pi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     """Configure the Pi coding agent (~/.pi/agent/models.json).
 
-    Provider entry under providers.tokenplan with api openai-completions;
+    Provider entry under providers.<BRAND_SLUG> with api openai-completions;
     models need only id (name/context defaults apply). Verified
-    end-to-end: pi listed the provider and reached the Token Plan endpoint.
+    end-to-end: pi listed the provider and reached the TokenHub endpoint.
     """
     agent_dir = _pi_agent_dir()
     agent_dir.mkdir(parents=True, exist_ok=True)
@@ -2289,7 +2412,9 @@ def configure_pi(base_url: str, api_key: str, plan: PlanSpec) -> None:
     providers = data.get("providers")
     if not isinstance(providers, dict):
         providers = {}
-    providers["tokenplan"] = {
+    for legacy in BRAND_LEGACY_KEYS:
+        providers.pop(legacy, None)
+    providers[BRAND_SLUG] = {
         "baseUrl": base_url,
         "api": "openai-completions",
         "apiKey": api_key,
@@ -2332,7 +2457,7 @@ def configure_zcode(base_url: str, api_key: str, plan: PlanSpec) -> None:
     if not isinstance(providers, dict):
         providers = {}
     providers[_ZCODE_PROVIDER_ID] = {
-        "name": "Tencent Cloud Token Plan",
+        "name": BRAND_VENDOR,
         "kind": "openai-compatible",
         "options": {"baseURL": base_url, "apiKey": api_key},
         "models": models,
@@ -2358,21 +2483,23 @@ CONFIGURATOR_REGISTRY: Dict[str, Callable[[str, str, PlanSpec], None]] = {
     "zcode": configure_zcode,
 }
 
-# doctor 用来判断"我们的配置块是否还在"的签名:工具 key -> (HOME 相对路径, 特征串)。
+# doctor 用来判断"我们的配置块还在不在"的签名:工具 key -> (HOME 相对路径,
+# 当前特征串, 旧版特征串)。旧特征用于兼容 2.5.x 写入的旧品牌配置——
+# 那些配置仍可正常工作,doctor 不应误报"配置缺失"(重跑 repair 即升级品牌)。
 # 必须与对应 configurator 实际写入的内容保持同步(有测试守着)。
-CONFIG_SIGNATURES: Dict[str, Tuple[str, str]] = {
-    "codebuddy": (".codebuddy/settings.json", "CODEBUDDY_API_KEY"),
-    "claude-code": (".claude/settings.json", "tokenplan"),
-    "hermes": (".hermes/config.yaml", "token-plan"),
-    "openclaw": (".openclaw/openclaw.json", "tokenplan"),
-    "opencode": (".config/opencode/opencode.json", "tokenplan"),
-    "dsh": (".dsh/settings.yaml", "tokenplan"),
-    "codex": (".codex/config.toml", "[model_providers.tokenplan]"),
-    "workbuddy": (".workbuddy/models.json", "Tencent Cloud Token Plan"),
-    "kimi": (".kimi-code/config.toml", "[providers.tokenplan]"),
-    "grok": (".grok/config.toml", "# Token Plan models begin"),
-    "pi": (".pi/agent/models.json", '"tokenplan"'),
-    "zcode": (".zcode/v2/config.json", "Tencent Cloud Token Plan"),
+CONFIG_SIGNATURES: Dict[str, Tuple[str, str, str]] = {
+    "codebuddy": (".codebuddy/settings.json", "CODEBUDDY_API_KEY", ""),
+    "claude-code": (".claude/settings.json", f'"{BRAND_SLUG}"', '"tokenplan"'),
+    "hermes": (".hermes/config.yaml", f"provider: {BRAND_SLUG}", "token-plan"),
+    "openclaw": (".openclaw/openclaw.json", f'"{BRAND_SLUG}"', '"tencent-tokenplan"'),
+    "opencode": (".config/opencode/opencode.json", f'"{BRAND_SLUG}"', '"tokenplan"'),
+    "dsh": (".dsh/settings.yaml", f"{BRAND_SLUG}:", "tokenplan:"),
+    "codex": (".codex/config.toml", f"[model_providers.{BRAND_SLUG}]", "[model_providers.tokenplan]"),
+    "workbuddy": (".workbuddy/models.json", BRAND_VENDOR, "Tencent Cloud Token Plan"),
+    "kimi": (".kimi-code/config.toml", f"[providers.{BRAND_SLUG}]", "[providers.tokenplan]"),
+    "grok": (".grok/config.toml", f"# {BRAND_NAME} models begin", "# Token Plan models begin"),
+    "pi": (".pi/agent/models.json", f'"{BRAND_SLUG}"', '"tokenplan"'),
+    "zcode": (".zcode/v2/config.json", BRAND_VENDOR, "Tencent Cloud Token Plan"),
 }
 
 
@@ -2381,16 +2508,18 @@ def probe_config(tool: ToolSpec) -> Optional[bool]:
 
     Returns None when the tool has no auto-config (guided only); True/False
     when the signature file exists and contains/misses our marker.
+    旧版品牌特征也算存在:配置仍有效,只是品牌名待升级(repair 可刷新)。
     """
     signature = CONFIG_SIGNATURES.get(tool.key)
     if not signature:
         return None
-    rel_path, marker = signature
+    rel_path, marker, legacy_marker = signature
     path = HOME / rel_path
     if not path.exists():
         return False
     try:
-        return marker in path.read_text(encoding="utf-8", errors="ignore")
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        return marker in text or (bool(legacy_marker) and legacy_marker in text)
     except OSError:
         return False
 
@@ -2404,14 +2533,22 @@ def configure_tool(tool: ToolSpec, base_url: str, api_key: str, plan: PlanSpec) 
 
 def choose_plan() -> PlanSpec:
     """Interactive plan selection (第一步); EOF without --plan is an error."""
+    total = len(PLAN_CATALOG)
     while True:
         print("  ── 第一步：选择套餐 ──")
         print()
-        for item in PLAN_CATALOG.values():
-            print(f"     [{item.choice}] {item.display_name}")
-        print()
+        for group_label, group_keys in PLAN_GROUPS:
+            print(f"  {CYAN}{group_label}{RESET}")
+            for key in group_keys:
+                item = PLAN_BY_KEY[key]
+                # 模型受限的套餐在菜单里就地提示,避免选完才发现
+                note = ""
+                if item.only_note and item.only_note.startswith("该套餐仅支持"):
+                    note = f" {DIM}（{item.only_note.replace('该套餐', '', 1)}）{RESET}"
+                print(f"     [{item.choice}] {item.display_name}{note}")
+            print()
         try:
-            choice = ask("  请输入数字 (1-4): ")
+            choice = ask(f"  请输入数字 (1-{total}): ")
         except EOFError:
             print()
             print(f"  {YELLOW}❌ 非交互环境无法选择套餐，请用 --plan 指定（如 --plan enterprise-pro）{RESET}")
@@ -2424,26 +2561,31 @@ def choose_plan() -> PlanSpec:
                 warn(plan.only_note)
             print()
             return plan
-        warn("请输入 1-4 之间的有效数字")
+        warn(f"请输入 1-{total} 之间的有效数字")
         print()
 
 
 def choose_run_mode() -> bool:
     """Interactive mode selection (第三步); EOF defaults to standard."""
+    options = (
+        ("标准安装 / 补全配置（推荐）", False),
+        ("仅修复已有安装的配置", True),
+    )
+    total = len(options)
     print("  ── 第三步：选择运行模式 ──")
     print()
-    print("  [1] 标准安装 / 补全配置（推荐）")
-    print("  [2] 仅修复已有安装的配置")
+    for i, (label, _) in enumerate(options, start=1):
+        print(f"  [{i}] {label}")
     print()
     while True:
         try:
-            choice = ask("  请输入数字 (1-2): ")
+            choice = ask(f"  请输入数字 (1-{total}): ").strip()
         except EOFError:
             print()
             info("（无输入，默认: 标准安装 / 补全配置）")
             print()
             return False
-        if choice == "1" or choice == "":
+        if choice in ("1", ""):
             print()
             ok("已选择: 标准安装 / 补全配置")
             print()
@@ -2454,7 +2596,7 @@ def choose_run_mode() -> bool:
             warn("此模式不会安装缺失依赖，只会修复已安装工具的配置")
             print()
             return True
-        warn("请输入 1 或 2")
+        warn(f"请输入 1-{total}")
         print()
 
 
@@ -2465,13 +2607,23 @@ def choose_tools() -> List[ToolSpec]:
     print("  输入编号选择，空格分隔；直接回车 = 全部")
     print("  支持输入 all 或 * 选择全部，输入 none 取消选择")
     print()
+    # 列宽按显示宽度对齐(中文名按 2 列),再用颜色包裹补齐后的纯文本
+    name_width = max(display_width(tool.name) for tool in TOOLS)
+    status_width = display_width("✓ 已安装")
     for idx, tool in enumerate(TOOLS, start=1):
-        adapter = get_backend_adapter(tool)
-        tag = {
-            "cli": f"{GREEN}自动安装{RESET}",
-            "desktop": f"{YELLOW}需先下载{RESET}",
-        }.get(tool.backend, f"{WHITE}{adapter.get('label', tool.backend)}{RESET}")
-        print(f"     [{idx}] {tool.name:26s} {tag}")
+        installed = tool.backend == "cli" and is_tool_installed(tool)
+        status = pad_display("✓ 已安装" if installed else "· 未安装", status_width)
+        if tool.backend == "desktop":
+            mode = pad_display("需手动下载", status_width)
+            mode_col = f"{YELLOW}{mode}{RESET}"
+            status_col = f"{DIM}{status}{RESET}"
+        else:
+            mode = pad_display("可自动安装", status_width)
+            mode_col = f"{GREEN}{mode}{RESET}"
+            status_col = (
+                f"{GREEN}{status}{RESET}" if installed else f"{DIM}{status}{RESET}"
+            )
+        print(f"     [{idx:2d}] {pad_display(tool.name, name_width)}  {status_col} {mode_col}")
     print()
 
     while True:
@@ -2518,7 +2670,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build the argparse CLI (subcommands, plan/key/tools/yes/verify-models)."""
     parser = argparse.ArgumentParser(
         prog="tokenplan-setup",
-        description="腾讯云 Token Plan 一键接入 CLI",
+        description=f"腾讯云 {BRAND_NAME} 一键接入 CLI",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -2630,9 +2782,7 @@ def run_doctor(
     """
     clear()
     print()
-    print("  ╔══════════════════════════════════════════════╗")
-    print("  ║           Token Plan 环境诊断               ║")
-    print("  ╚══════════════════════════════════════════════╝")
+    print_banner(f"{BRAND_NAME} 环境诊断")
     print()
     prerequisites_ready = check_prerequisites(selected_tools)
     print()
@@ -2644,11 +2794,11 @@ def run_doctor(
         configured = probe_config(tool)
         if configured is True and not installed:
             # 配置已写好但应用本体不在(桌面应用手动安装类,如 WorkBuddy)
-            status = "未安装应用,但 Token Plan 模型配置已就绪"
+            status = f"未安装应用,但 {BRAND_NAME} 模型配置已就绪"
         elif installed and configured is True:
-            status = "已安装,Token Plan 配置有效"
+            status = f"已安装,{BRAND_NAME} 配置有效"
         elif installed and configured is False:
-            status = "已安装,Token Plan 配置缺失"
+            status = f"已安装,{BRAND_NAME} 配置缺失"
         elif installed:
             status = "已安装"
         else:
@@ -2774,9 +2924,7 @@ def run_uninstall(yes: bool) -> int:
     """Restore backups, strip rc blocks, remove generated files and env vars."""
     clear()
     print()
-    print("  ╔══════════════════════════════════════════════╗")
-    print("  ║        Token Plan 接入卸载 / 还原            ║")
-    print("  ╚══════════════════════════════════════════════╝")
+    print_banner(f"{BRAND_NAME} 接入卸载 / 还原")
     print()
     info("卸载范围：配置还原 + 安装器写入的文件/环境变量/PATH 修改")
     warn("不会卸载工具本体（npm 包、CLI 程序不会被删除）")
@@ -2976,10 +3124,7 @@ def _run_setup_flow(args: argparse.Namespace) -> Tuple[int, Dict[str, object]]:
 
     clear()
     print()
-    print("  ╔══════════════════════════════════════════════╗")
-    print("  ║   腾讯云 Token Plan — 一键接入 CLI         ║")
-    print("  ║   只需 API Key，其余尽可能自动              ║")
-    print("  ╚══════════════════════════════════════════════╝")
+    print_banner(f"腾讯云 {BRAND_NAME} — 一键接入 CLI", "只需 API Key，其余尽可能自动")
     print()
     print("  命令: setup / repair / doctor / uninstall")
     print(f"  版本: v{VERSION}（默认: setup）")
@@ -3190,9 +3335,7 @@ def _run_setup_flow(args: argparse.Namespace) -> Tuple[int, Dict[str, object]]:
 
     print(f"  [{'█' * bar_len}] {total}/{total}")
     print()
-    print("  ╔══════════════════════════════════════════════╗")
-    print("  ║                 配 置 完 成                 ║")
-    print("  ╚══════════════════════════════════════════════╝")
+    print_banner("配 置 完 成")
     print()
 
     if repair_mode:

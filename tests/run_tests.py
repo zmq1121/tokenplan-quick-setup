@@ -100,7 +100,7 @@ def test_registry():
     check("配置签名与配置器一一对应",
           set(mod.CONFIG_SIGNATURES) == set(mod.CONFIGURATOR_REGISTRY))
     check("每个签名文件路径存在且特征串非空",
-          all(rel and marker for rel, marker in mod.CONFIG_SIGNATURES.values()))
+          all(rel and marker for rel, marker, _legacy in mod.CONFIG_SIGNATURES.values()))
 
 
 def test_registry_windows():
@@ -121,18 +121,18 @@ def test_toml_surgery():
     entries = {"name": "T", "base_url": "https://x", "wire_api": "chat",
                "env_key": "TOKENPLAN_API_KEY"}
 
-    lines = S(U(U([], "model_provider", "tokenplan"), "model", "glm-5.2"),
-              "[model_providers.tokenplan]", entries)
+    lines = S(U(U([], "model_provider", "tokenhub"), "model", "glm-5.2"),
+              "[model_providers.tokenhub]", entries)
     text = "\n".join(lines)
-    check("TOML: 全新生成含根键与表", "model_provider" in text and "[model_providers.tokenplan]" in text)
+    check("TOML: 全新生成含根键与表", "model_provider" in text and "[model_providers.tokenhub]" in text)
     check("TOML: 根键位于表头之前", text.index("model_provider") < text.index("["))
 
     existing = ['model = "gpt-5"', 'approval_mode = "on-request"', "",
                 "[model_providers.openai]", 'name = "OpenAI"', "",
                 '[projects."work"]', 'trust_level = "trusted"']
-    lines = U(list(existing), "model_provider", "tokenplan")
+    lines = U(list(existing), "model_provider", "tokenhub")
     lines = U(lines, "model", "glm-5.2")
-    lines = S(lines, "[model_providers.tokenplan]", entries)
+    lines = S(lines, "[model_providers.tokenhub]", entries)
     text = "\n".join(lines)
     check("TOML: 未知根键保留", "approval_mode" in text)
     check("TOML: 用户 provider 保留", "model_providers.openai" in text)
@@ -178,12 +178,24 @@ def test_codex_config():
         mod.configure_codex(base, key, plan)
     text = cfg.read_text()
     check("Codex: 用户 provider 保留", "model_providers.openai" in text)
-    check("Codex: 我们的节共存", "model_providers.tokenplan" in text)
+    check("Codex: 我们的节共存(新品牌口径)",
+          f"model_providers.{mod.BRAND_SLUG}" in text)
 
     before = text
     with contextlib.redirect_stdout(io.StringIO()):
         mod.configure_codex(base, key, plan)
     check("Codex: 幂等", cfg.read_text() == before)
+
+    # 旧品牌段(2.5.x)在重跑时被摘除,不再残留失效入口
+    cfg.write_text(
+        'model = "glm-5.2"\n\n[model_providers.tokenplan]\nname = "Tencent Cloud Token Plan"\n'
+        'base_url = "https://old"\nwire_api = "chat"\n\n[model_providers.openai]\nname = "OpenAI"\n'
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        mod.configure_codex(base, key, plan)
+    text = cfg.read_text()
+    check("Codex: 旧品牌段摘除", "model_providers.tokenplan" not in text)
+    check("Codex: 旧段摘除后新段在", f"model_providers.{mod.BRAND_SLUG}" in text)
 
 
 # ---------------------------------------------------------------------------
@@ -517,11 +529,11 @@ def test_new_tool_configs():
 
     # Kimi Code: config.toml
     toml = (tmp / ".kimi-code" / "config.toml").read_text()
-    check("kimi: provider 段", "[providers.tokenplan]" in toml)
+    check("kimi: provider 段", f"[providers.{mod.BRAND_SLUG}]" in toml)
     check("kimi: 默认模型", 'default_model = "%s"' % models[0] in toml)
-    check("kimi: 默认 provider", 'default_provider = "tokenplan"' in toml)
+    check("kimi: 默认 provider", 'default_provider = "%s"' % mod.BRAND_SLUG in toml)
     check("kimi: 默认键在首个表头之前(顶层)",
-          toml.index("default_provider") < toml.index("[providers.tokenplan]"))
+          toml.index("default_provider") < toml.index(f"[providers.{mod.BRAND_SLUG}]"))
     check("kimi: 模型段数", toml.count("[models.") == len(models))
     check("kimi: max_context_size 必填字段", "max_context_size" in toml)
     # 含点号的模型 id(minimax-m2.7 等)必须引号包裹:
@@ -535,7 +547,7 @@ def test_new_tool_configs():
     with contextlib.redirect_stdout(buf):
         mod.configure_kimi(base, key, plan)
     toml2 = (tmp / ".kimi-code" / "config.toml").read_text()
-    check("kimi: 幂等重跑不重复", toml2.count("[providers.tokenplan]") == 1
+    check("kimi: 幂等重跑不重复", toml2.count(f"[providers.{mod.BRAND_SLUG}]") == 1
           and toml2.count("[models.") == len(models))
 
     # Grok: config.toml
@@ -545,7 +557,7 @@ def test_new_tool_configs():
     check("grok: 模型段全部引号包裹(点号安全)",
           len(gsecs) == len(models) and all('"' in s for s in gsecs))
     check("grok: base_url 写入", base in gtoml)
-    check("grok: 托管标记", "# Token Plan models begin" in gtoml)
+    check("grok: 托管标记", f"# {mod.BRAND_NAME} models begin" in gtoml)
     with contextlib.redirect_stdout(buf):
         mod.configure_grok(base, key, plan)
     gtoml2 = (tmp / ".grok" / "config.toml").read_text()
@@ -553,8 +565,8 @@ def test_new_tool_configs():
 
     # Pi: models.json
     pdata = json.loads((tmp / ".pi" / "agent" / "models.json").read_text())
-    check("pi: provider 注册", "tokenplan" in pdata["providers"])
-    prov = pdata["providers"]["tokenplan"]
+    check("pi: provider 注册", mod.BRAND_SLUG in pdata["providers"])
+    prov = pdata["providers"][mod.BRAND_SLUG]
     check("pi: openai-completions 协议", prov["api"] == "openai-completions")
     check("pi: 模型数", len(prov["models"]) == len(models))
     check("pi: 模型 id 结构", prov["models"][0]["id"] == models[0])
@@ -601,7 +613,9 @@ def test_doctor_config_probe():
     cfg = tmp / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text('model = "glm-5.2"\n\n[model_providers.tokenplan]\nname = "Token Plan"\n')
-    check("probe: 签名存在 → True", mod.probe_config(tool) is True)
+    check("probe: 旧版签名(2.5.x 品牌) → True", mod.probe_config(tool) is True)
+    cfg.write_text(f'[model_providers.{mod.BRAND_SLUG}]\n')
+    check("probe: 当前签名 → True", mod.probe_config(tool) is True)
 
     # 配置被外部覆盖(签名丢失)→ False
     cfg.write_text('model = "gpt-5"\n')
@@ -615,7 +629,7 @@ def test_doctor_config_probe():
         mod.run_doctor([tool])
     out = buf.getvalue()
     check("doctor: 配置缺失提示 repair", "配置缺失" in out and "repair" in out)
-    cfg.write_text('[model_providers.tokenplan]\n')
+    cfg.write_text(f'[model_providers.{mod.BRAND_SLUG}]\n')
     buf2 = _io.StringIO()
     with contextlib.redirect_stdout(buf2):
         mod.run_doctor([tool])
@@ -1339,7 +1353,7 @@ def test_doctor_deep():
     mod.is_tool_installed = lambda t: True
     cfg = tmp / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text('[model_providers.tokenplan]\nname = "Token Plan"\n')
+    cfg.write_text(f'[model_providers.{mod.BRAND_SLUG}]\nname = "{mod.BRAND_VENDOR}"\n')
 
     plan = mod.PLAN_CATALOG["3"]
     import contextlib, io as _io
@@ -1365,6 +1379,203 @@ def test_doctor_deep():
         code = mod.run_doctor([mod.TOOL_BY_KEY["codex"]], deep=True,
                               plan=plan, api_key="")
     check("doctor --deep: 缺 Key → 2", code == 2)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 品牌口径迁移(2.6.0)——TokenHub 统一 + 旧键清理 + 展示优化
+
+def test_brand_migration():
+    mod = load_module()
+    tmp = sandbox(mod)
+    base = "https://tokenhub.tencentmaas.com/plan/v3"
+    key = "sk-brand-test-123456"
+    plan = mod.PLAN_CATALOG["3"]
+    buf = io.StringIO()
+
+    # 常量口径自洽
+    check("品牌: slug 不在旧键集合里", mod.BRAND_SLUG not in mod.BRAND_LEGACY_KEYS)
+    check("品牌: 常量非空", all([mod.BRAND_NAME, mod.BRAND_SLUG, mod.BRAND_VENDOR]))
+
+    # 套餐分组表覆盖全部套餐且不重复
+    grouped = [k for _, keys in mod.PLAN_GROUPS for k in keys]
+    check("品牌: 套餐分组全覆盖不重复",
+          sorted(grouped) == sorted(p.key for p in mod.PLAN_CATALOG.values()))
+
+    # subprocess 桩:挡掉 pgrep/reg query 等真实调用
+    real_run = mod.subprocess.run
+    mod.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 1})()
+
+    # Hermes: provider 键与展示名走 TokenHub(用户报告的问题点)
+    with contextlib.redirect_stdout(buf):
+        mod.configure_hermes(base, key, plan)
+    hcfg = (tmp / ".hermes" / "config.yaml").read_text()
+    check("hermes: provider 键为 tokenhub", f"provider: {mod.BRAND_SLUG}" in hcfg)
+    check("hermes: 展示名为 TokenHub", f"name: {mod.BRAND_NAME}" in hcfg)
+    check("hermes: 无旧品牌残留", "token-plan" not in hcfg)
+
+    # OpenCode: 旧 provider 摘除,用户自建 provider 保留
+    oc = tmp / ".config" / "opencode" / "opencode.json"
+    oc.parent.mkdir(parents=True, exist_ok=True)
+    oc.write_text(json.dumps({
+        "provider": {
+            "openai": {"name": "OpenAI", "options": {"apiKey": "sk-user"}},
+            "tokenplan": {"name": "旧名", "options": {"apiKey": "sk-old"}},
+        },
+    }, ensure_ascii=False))
+    with contextlib.redirect_stdout(buf):
+        mod.configure_opencode(base, key, plan)
+    data = json.loads(oc.read_text())
+    check("opencode: 新 provider 键", mod.BRAND_SLUG in data["provider"])
+    check("opencode: 旧 provider 键已摘除", "tokenplan" not in data["provider"])
+    check("opencode: 用户 provider 保留", "openai" in data["provider"])
+
+    # Pi: 旧键清理
+    pi = tmp / ".pi" / "agent" / "models.json"
+    pi.parent.mkdir(parents=True, exist_ok=True)
+    pi.write_text(json.dumps({"providers": {"tokenplan": {"baseUrl": "x"}}}))
+    with contextlib.redirect_stdout(buf):
+        mod.configure_pi(base, key, plan)
+    pdata = json.loads(pi.read_text())
+    check("pi: 旧键摘除", "tokenplan" not in pdata["providers"])
+    check("pi: 新键写入", mod.BRAND_SLUG in pdata["providers"])
+
+    # OpenClaw: 旧 provider 及 agents 引用一并清理
+    ow = tmp / ".openclaw" / "openclaw.json"
+    ow.parent.mkdir(parents=True, exist_ok=True)
+    ow.write_text(json.dumps({
+        "models": {"mode": "merge", "providers": {
+            "tencent-tokenplan": {"baseUrl": "x"},
+        }},
+        "agents": {"defaults": {"models": {
+            "tencent-tokenplan/glm-5.2": {"alias": "glm-5.2"},
+        }}},
+    }, ensure_ascii=False))
+    with contextlib.redirect_stdout(buf):
+        mod.configure_openclaw(base, key, plan)
+    odata = json.loads(ow.read_text())
+    check("openclaw: 旧 provider 摘除",
+          "tencent-tokenplan" not in odata["models"]["providers"])
+    check("openclaw: 旧 agents 引用摘除",
+          not [k for k in odata["agents"]["defaults"]["models"]
+               if k.startswith("tencent-")])
+    check("openclaw: 新 provider 写入",
+          mod.BRAND_SLUG in odata["models"]["providers"])
+
+    # Kimi: 旧 providers 段摘除
+    km = tmp / ".kimi-code" / "config.toml"
+    km.parent.mkdir(parents=True, exist_ok=True)
+    km.write_text('[providers.tokenplan]\ntype = "openai"\nbase_url = "https://old"\n')
+    with contextlib.redirect_stdout(buf):
+        mod.configure_kimi(base, key, plan)
+    ktoml = km.read_text()
+    check("kimi: 旧 providers 段摘除", "[providers.tokenplan]" not in ktoml)
+    check("kimi: 新 providers 段写入", f"[providers.{mod.BRAND_SLUG}]" in ktoml)
+
+    # Codex: 旧 model_providers 段摘除
+    cx = tmp / ".codex" / "config.toml"
+    cx.parent.mkdir(parents=True, exist_ok=True)
+    cx.write_text(
+        '[model_providers.tokenplan]\nname = "Tencent Cloud Token Plan"\n'
+        'base_url = "https://old"\nwire_api = "chat"\n'
+    )
+    real_env = mod.install_codex_shell_env
+    mod.install_codex_shell_env = lambda k: None
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.configure_codex(base, key, plan)
+    finally:
+        mod.install_codex_shell_env = real_env
+    ctoml = cx.read_text()
+    check("codex: 旧 model_providers 段摘除",
+          "[model_providers.tokenplan]" not in ctoml)
+    check("codex: 新段写入", f"[model_providers.{mod.BRAND_SLUG}]" in ctoml)
+
+    # Claude: 旧记账键/旧模型文件/旧启动器清理,新命名生效
+    cs = tmp / ".claude" / "settings.json"
+    cs.parent.mkdir(parents=True, exist_ok=True)
+    cs.write_text(json.dumps(
+        {"tokenplan": {"provider": "anthropic"}}, ensure_ascii=False))
+    old_launcher = tmp / ".local" / "bin" / "claude-tokenplan"
+    old_launcher.parent.mkdir(parents=True, exist_ok=True)
+    old_launcher.write_text("#!/bin/sh\n")
+    with contextlib.redirect_stdout(buf):
+        mod.configure_claude_code(base, key, plan)
+    cdata = json.loads(cs.read_text())
+    check("claude: 旧记账键摘除", "tokenplan" not in cdata)
+    check("claude: 新记账键写入", mod.BRAND_SLUG in cdata)
+    check("claude: 旧启动器清理", not old_launcher.exists())
+    check("claude: 新启动器就位",
+          (tmp / ".local" / "bin" / f"claude-{mod.BRAND_SLUG}").exists())
+    check("claude: 新模型文件",
+          (tmp / ".claude" / f"{mod.BRAND_SLUG}-models.json").exists())
+    check("claude: 旧模型文件清理",
+          not (tmp / ".claude" / "tokenplan-models.json").exists())
+
+    # WorkBuddy: 展示名 TokenHub 前缀 + vendor 新口径(顶层是列表)
+    with contextlib.redirect_stdout(buf):
+        mod.configure_workbuddy(base, key, plan)
+    wdata = json.loads((tmp / ".workbuddy" / "models.json").read_text())
+    check("workbuddy: 模型名 TokenHub 前缀",
+          all(e["name"].startswith(mod.BRAND_NAME) for e in wdata))
+    check("workbuddy: vendor 新口径",
+          all(e["vendor"] == mod.BRAND_VENDOR for e in wdata))
+
+    # DSH: provider 键与 displayName
+    with contextlib.redirect_stdout(buf):
+        mod.configure_dsh(base, key, plan)
+    dcfg = (tmp / ".dsh" / "settings.yaml").read_text()
+    check("dsh: provider 键为 tokenhub", f"    {mod.BRAND_SLUG}:" in dcfg)
+    check("dsh: displayName 为 TokenHub", f"displayName: {mod.BRAND_NAME}" in dcfg)
+
+    mod.subprocess.run = real_run
+
+    # probe: 旧品牌配置不误报(2.5.x 用户 doctor 仍绿,repair 即升级)
+    hm = tmp / ".hermes" / "config.yaml"
+    hm.write_text("model:\n  provider: token-plan\n")
+    check("probe: hermes 旧品牌配置 → True",
+          mod.probe_config(mod.TOOL_BY_KEY["hermes"]) is True)
+
+    # 动态提示范围: 套餐总数进入提示文案(修复写死的 1-4)
+    prompts = []
+    def _ask(prompt=""):
+        prompts.append(prompt)
+        return "1"
+    mod.ask = _ask
+    with contextlib.redirect_stdout(buf):
+        mod.choose_plan()
+    total = len(mod.PLAN_CATALOG)
+    check("提示: 套餐范围动态生成", f"(1-{total})" in prompts[0] and total > 4)
+
+    # 套餐菜单: 分组标题与受限套餐内联提示
+    pbuf = io.StringIO()
+    with contextlib.redirect_stdout(pbuf):
+        mod.choose_plan()
+    menu = pbuf.getvalue()
+    check("菜单: 套餐分组标题", all(g in menu for g, _ in mod.PLAN_GROUPS))
+    check("菜单: 受限套餐内联提示", "仅支持" in menu)
+
+    # 工具菜单: 状态列(桩掉 is_tool_installed 保证两种状态都出现)
+    real_installed = mod.is_tool_installed
+    mod.is_tool_installed = lambda t: t.key == "dsh"
+    tbuf = io.StringIO()
+    with contextlib.redirect_stdout(tbuf):
+        mod.choose_tools()
+    mod.is_tool_installed = real_installed
+    tmenu = tbuf.getvalue()
+    check("菜单: 已安装状态列", "✓ 已安装" in tmenu)
+    check("菜单: 未安装状态列", "· 未安装" in tmenu)
+    check("菜单: 桌面工具手动下载提示", "需手动下载" in tmenu)
+    check("菜单: CLI 可自动安装提示", "可自动安装" in tmenu)
+
+    # 横幅: 按显示宽度对齐(中文标题下右边框不漂移)
+    bbuf = io.StringIO()
+    with contextlib.redirect_stdout(bbuf):
+        mod.print_banner(f"{mod.BRAND_NAME} 环境诊断")
+    blines = [l for l in bbuf.getvalue().splitlines() if l.strip()]
+    widths = {mod.display_width(l) for l in blines}
+    check("横幅: 全行显示宽度一致(CJK 对齐)", len(widths) == 1)
+    check("横幅: 边框闭合", blines[0].lstrip().startswith("╔")
+          and blines[-1].lstrip().startswith("╚"))
 
 
 TEST_GROUPS = [
@@ -1394,6 +1605,7 @@ TEST_GROUPS = [
     ("env-key", test_env_key),
     ("http", test_http_helper),
     ("doctor-deep", test_doctor_deep),
+    ("brand-migration", test_brand_migration),
     ("consistency", test_repo_consistency),
 ]
 

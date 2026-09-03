@@ -2,6 +2,30 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.4.0] - 2026-09-03
+
+### 新增:国际站后付费(选项 9)
+
+官方国际站文档(product/1300/78934,按量计费)对应的后付费产品线:
+
+- 端点 `https://tokenhub-intl.tencentcloudmaas.com/v1`(与中国站后付费
+  结构一致,已探活:/models、/chat/completions、/responses、/messages、
+  /embeddings 全部有鉴权层响应)
+- Key 在国际站控制台创建:console.tencentcloud.com(两站 Key 不互通,
+  已实测:中国站后付费 Key 打国际站 401002)
+- 模型列表同样走 /v1/models 动态发现;原选项 8 更名"后付费 - 按量计费
+  (中国站)",行为不变
+- **模型层待验证**:国际站后付费的可用模型清单需要国际站后付费 Key
+  才能拉取(README 验证矩阵已如实标注)
+
+同时:`postpaid` 的全部特殊分支(模型发现、Key 验证、Claude 槽位
+挑选、--models 选择、目录交叉检查豁免)统一扩展到 `postpaid-intl`,
+两者共用同一套发现逻辑,仅 base_url 与 Key 控制台不同。
+
+套餐选择 8 → 9 项;测试 167 → 169(国际后付费端点/控制台断言)。
+
+[2.4.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.4.0
+
 ## [2.3.0] - 2026-09-02
 
 ### 修复:国际站端点域名错误 + 全部套餐模型目录按真 Key 实测重建

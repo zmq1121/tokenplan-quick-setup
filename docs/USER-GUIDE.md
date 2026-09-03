@@ -28,7 +28,8 @@ API Key 以 `sk-` 开头,在腾讯云控制台创建。不同产品线对应不�
 | 个人版 - Hy(混元) | https://console.cloud.tencent.com/tokenhub/tokenplan/hy/api-key |
 | 企业版(专业/轻享) | https://console.cloud.tencent.com/tokenhub/tokenplan-e/api-key |
 | 国际站(新加坡) | https://console.cloud.tencent.com/tokenhub/apikey |
-| 后付费(按量计费) | https://console.cloud.tencent.com/tokenhub/apikey |
+| 后付费(按量计费,中国站) | https://console.cloud.tencent.com/tokenhub/apikey |
+| 后付费(按量计费,国际站) | https://console.tencentcloud.com/tokenhub/apikey |
 
 安装器在选定套餐后会显示对应的获取地址,可直接前往。
 
@@ -76,7 +77,7 @@ bash setup.command
 
 安装器依次完成四个步骤:
 
-**步骤一:选择套餐**。按已订阅的产品选择对应编号,共 8 项:中国站个人版 2 项、企业版 2 项、国际站 3 项、后付费 1 项。不确定时以订阅页面显示的名称为准。
+**步骤一:选择套餐**。按已订阅的产品选择对应编号,共 9 项:中国站个人版 2 项、企业版 2 项、国际站 3 项、后付费 2 项(中国站/国际站)。不确定时以订阅页面显示的名称为准。
 
 **步骤二:输入 API Key**。粘贴后回车,安装器实时验证。验证失败时检查 Key 是否复制完整、与所选套餐是否匹配,然后重新粘贴。
 

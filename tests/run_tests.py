@@ -83,9 +83,15 @@ def test_registry():
     check("plugin 工具都有扩展 ID",
           all(t.key in mod.PLUGIN_EXTENSION_IDS for t in mod.TOOLS if t.backend == "plugin"))
     check("backend 全部已注册", all(t.backend in mod.BACKEND_REGISTRY for t in mod.TOOLS))
-    check("8 个套餐(4 中国站 + 3 国际站 + 1 后付费)", len(mod.PLAN_CATALOG) == 8)
+    check("9 个套餐(4 中国站 + 3 国际站套餐 + 2 后付费)",
+          len(mod.PLAN_CATALOG) == 9)
     check("后付费套餐走 tokenhub /v1 端点",
           mod.PLAN_CATALOG["8"].base_url == "https://tokenhub.tencentmaas.com/v1")
+    check("国际站后付费走 intl /v1 端点(与套餐版同域)",
+          mod.PLAN_CATALOG["9"].base_url
+          == "https://tokenhub-intl.tencentcloudmaas.com/v1")
+    check("两站后付费 Key 控制台不同",
+          mod.PLAN_CATALOG["8"].key_url != mod.PLAN_CATALOG["9"].key_url)
     check("国际站套餐走 intl 端点",
           all(p.base_url.startswith("https://tokenhub-intl.")
               for p in mod.PLAN_CATALOG.values() if p.key.startswith("intl-")))
@@ -850,7 +856,7 @@ def test_remote_catalog():
           set(plans) == {p.key for p in mod.PLAN_CATALOG.values()})
     check("目录: 每个套餐都有 default+display(后付费除外:运行时发现)",
           all(
-              (plans[k].get("display") or k == "postpaid")
+              (plans[k].get("display") or k in ("postpaid", "postpaid-intl"))
               for k in plans
           ) and all("default" in plans[k] for k in plans))
     check("目录: display 行都有 ':' 分隔",

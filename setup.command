@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -488,6 +488,11 @@ MODEL_CATALOG = {
         "default": "",
         "display": (),
     },
+    # 国际站后付费:同样走 /v1/models 动态发现,无内置策展
+    "postpaid-intl": {
+        "default": "",
+        "display": (),
+    },
 }
 
 # Claude Code exposes three fixed custom slots. Keep these mappings separate from
@@ -574,10 +579,18 @@ PLAN_CATALOG: Dict[str, PlanSpec] = {
     "8": PlanSpec(
         choice="8",
         key="postpaid",
-        display_name="后付费 - 按量计费（大模型服务平台）",
+        display_name="后付费 - 按量计费（中国站）",
         base_url="https://tokenhub.tencentmaas.com/v1",
         key_url="https://console.cloud.tencent.com/tokenhub/apikey",
         only_note="按 token 计费(非套餐订阅);模型列表由 API 实时发现,需联网",
+    ),
+    "9": PlanSpec(
+        choice="9",
+        key="postpaid-intl",
+        display_name="后付费 - 按量计费（国际站）",
+        base_url="https://tokenhub-intl.tencentcloudmaas.com/v1",
+        key_url="https://console.tencentcloud.com/tokenhub/apikey",
+        only_note="新加坡地域,按 token 计费(非套餐订阅);模型列表由 API 实时发现,需联网",
     ),
 }
 
@@ -1345,11 +1358,11 @@ def get_model_catalog(plan_key: str) -> Dict[str, object]:
     Postpaid is special: its model list is discovered live from the API
     (dynamic catalog, no built-in curation); discovery result wins.
     """
-    if plan_key == "postpaid":
+    if plan_key in ("postpaid", "postpaid-intl"):
         discovered = _postpaid_catalog()
         if discovered:
             return discovered
-        return MODEL_CATALOG.get(plan_key, {"default": "", "display": ()})
+        return {"default": "", "display": ()}
     remote = (_REMOTE_CATALOG or {}).get(plan_key)
     if isinstance(remote, dict) and remote.get("default") and remote.get("display"):
         return remote
@@ -1390,7 +1403,7 @@ def _format_api_error(body: str, limit: int = 160) -> str:
 
 def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
     """Probe the endpoint with a 1-token chat completion using the plan's default model."""
-    if plan.key == "postpaid":
+    if plan.key in ("postpaid", "postpaid-intl"):
         # 后付费:GET /models 即验证(200+列表 = Key 有效),同时完成模型发现
         spinner = Spinner("验证 API Key 并发现模型...")
         spinner.start()
@@ -1478,7 +1491,7 @@ def configure_claude_code(base_url: str, api_key: str, plan: PlanSpec) -> None:
     default_model = str(catalog["default"])
     model_ids = get_model_ids(plan.key)
     claude_slots = CLAUDE_MODEL_SLOTS.get(plan.key, {})
-    if not claude_slots and plan.key == "postpaid" and model_ids:
+    if not claude_slots and plan.key in ("postpaid", "postpaid-intl") and model_ids:
         # 后付费无固定槽位映射:从发现列表按能力倾向挑选
         def _pick(*keywords: str) -> str:
             for kw in keywords:
@@ -2817,7 +2830,7 @@ def main() -> None:
     notify_upgrade_available()
     print()
 
-    if plan.key == "postpaid":
+    if plan.key in ("postpaid", "postpaid-intl"):
         # 后付费:目录即发现结果,无交叉检查
         if not _POSTPAID_DISCOVERED:
             # verify 失败后用户仍选择继续:再试一次发现,失败则中止
@@ -2845,7 +2858,7 @@ def main() -> None:
                 ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
     print()
 
-    if args.models and plan.key != "postpaid":
+    if args.models and plan.key not in ("postpaid", "postpaid-intl"):
         warn("--models 目前仅支持后付费套餐,已忽略")
 
     repair_mode = args.command == "repair" or (args.command == "setup" and choose_run_mode())

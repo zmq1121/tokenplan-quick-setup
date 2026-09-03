@@ -48,7 +48,8 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 5 | 个人版 | 国际站(新加坡) | `https://tokenhub-intl.tencentcloudmaas.com/plan/v3` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
 | 6 | 企业版 - 专业套餐 | 国际站(新加坡) | 同选项 5 | 同选项 5 |
 | 7 | 企业版 - 轻享套餐 | 国际站(新加坡) | 同选项 5 | 同选项 5 |
-| 8 | 后付费 - 按量计费 | — | `https://tokenhub.tencentmaas.com/v1` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
+| 8 | 后付费 - 按量计费 | 中国站 | `https://tokenhub.tencentmaas.com/v1` | [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) |
+| 9 | 后付费 - 按量计费 | 国际站 | `https://tokenhub-intl.tencentcloudmaas.com/v1` | [TokenHub 控制台(国际)](https://console.tencentcloud.com/tokenhub/apikey) |
 
 - 选项 1-7 为包月订阅,不同产品线的 API Key 不通用,请在对应控制台创建
 - 选项 8 按 token 计费,模型列表由 `/v1/models` 实时发现并自动过滤非聊天模型,可交互选择或通过 `--models` 参数指定;支持全部 12 个工具
@@ -81,6 +82,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 | 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
 | 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
 | 国际版(tencentcloudmaas) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code ✓ |
+| 国际站后付费(/v1) | 端点结构与中国站一致(models/chat/responses/messages/embeddings,已探活) | 模型层待验证(需国际站后付费 Key;两站 Key 不互通) |
 
 ZCode 为配置层写入(格式经两个第三方工具交叉确认,闭源客户端未实测)。
 

@@ -77,7 +77,7 @@ npx --registry=https://registry.npmmirror.com tokenplan-setup
 
 | 产品线 | 协议端点 | 工具端到端(真实对话) |
 |--------|:---:|:---:|
-| 个人通用/混元(lkeap) | chat ✓ / anthropic ✓(responses 无此端点) | Kimi Code ✓ |
+| 个人通用/混元(lkeap) | chat ✓ / anthropic ✓(responses 无此端点) | 全部 12 工具(混元套餐实测,Codex 需降级,见下) |
 | 企业专业/轻享(tokenhub) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code 全 ✓ |
 | 后付费(tokenhub /v1) | chat ✓ / responses ✓ / anthropic ✓ | Kimi Code ✓(130 模型自动发现) |
 | 国际版(tencentcloudmaas) | chat ✓ / responses ✓ / anthropic ✓ | Codex、Kimi Code、Grok、Pi、Claude Code ✓ |

@@ -37,8 +37,35 @@ glm-5.3、个人版 deepseek-v4-flash-202605)。
 
 国际企业专业版:codex / kimi / grok / pi / claude-code 五工具全部
 真实对话通过;三协议(chat/responses/anthropic)端点全通。国际个人版
-6 模型 × responses 逐一验证。至此 8 个产品线中 7 个完成真 Key 实测
-(仅个人混元版无独立 Key,沿用官方文档目录)。
+6 模型 × responses 逐一验证。
+
+### 个人混元版:12 工具全量真 Key 端到端(2026-09-03)
+
+混元版与通用版共用 API Key(用户确认),模型 hy3 / hy4-preview。
+全部 12 个工具在隔离 HOME 下由安装器写入配置后逐个真实运行:
+
+| 工具 | 结果 | 备注 |
+|------|:---:|------|
+| Hermes Agent | ✓ | `hermes chat -q -m hy3 -Q` |
+| CodeBuddy Code | ✓ | `--model custom-local:hy3`(初测遇官方 key 校验服务 504,重试通过) |
+| Claude Code | ✓ | hy3 / plan/anthropic 端点 |
+| OpenCode | ✓ | `-m tokenplan/hy3` |
+| OpenClaw | ✓ | `agent --local`,日志确认请求打 lkeap,status 200 |
+| DeepSeek Harness | ✓ | `--profile headless`(profile 需用户侧已存在,settings.yaml 的 llm-pi-ai 命名空间生效) |
+| Codex CLI | △ | 见下方说明 |
+| WorkBuddy | ⚙️ | 配置层(models.json 写入 hy3/hy4-preview) |
+| Kimi Code | ✓ | 默认 hy3 |
+| Grok CLI | ✓ | hy4-preview |
+| Pi | ✓ | `--model tokenplan/hy3` |
+| ZCode | ⚙️ | 配置层(config.json) |
+
+**Codex 专测结论**:实测 0.115–0.152 全部拒绝 `wire_api = "chat"`
+(报"no longer supported"),比 #7782 讨论宣布的移除时间更早;而 lkeap
+个人版无 /responses 端点。即**当前所有可安装的 Codex 版本都无法在
+个人版上工作**——官方文档 1823/130071 的配置在现行 Codex 上同样
+报错,属上游冲突;安装器按官方文档写入 chat 并在配置时警告。
+
+至此 8 个产品线全部完成真 Key 实测(混元与通用共用 Key)。
 
 [2.3.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.3.0
 

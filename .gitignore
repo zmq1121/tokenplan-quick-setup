@@ -22,3 +22,6 @@ Thumbs.db
 
 # 本地运维存档,不入库
 docs/RELEASE-*.md
+
+# 官方 CLI 构建产物,仅作本地参考,不入库
+/tokenhub-cli/

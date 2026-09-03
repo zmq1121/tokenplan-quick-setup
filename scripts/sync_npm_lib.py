@@ -2,6 +2,8 @@
 """同步构建产物:npm/lib/setup.command 与主脚本对齐,并刷新 setup.bat 的版本与 SHA256。
 
 发布前必须执行;tests/run_tests.py 的 consistency 组会校验字节一致与哈希匹配。
+同时再生 models.json.sha256(远程目录完整性校验依赖,改 models.json 后必须刷新;
+在这里自动再生保证"改了目录忘刷哈希"不可能发生)。
 """
 import hashlib
 import re
@@ -13,6 +15,8 @@ REPO = Path(__file__).resolve().parent.parent
 src = REPO / "setup.command"
 dst = REPO / "npm" / "lib" / "setup.command"
 bat = REPO / "setup.bat"
+catalog = REPO / "models.json"
+catalog_sha = REPO / "models.json.sha256"
 
 if not src.exists():
     print(f"missing {src}", file=sys.stderr)
@@ -21,6 +25,19 @@ if not src.exists():
 dst.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(src, dst)
 print(f"synced {dst.relative_to(REPO)} ({src.stat().st_size} bytes)")
+
+# models.json.sha256:与 models.json 字节严格对应(refresh_remote_catalog 会校验)
+if catalog.exists():
+    digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
+    expected = f"{digest}  models.json\n"
+    if not catalog_sha.exists() or catalog_sha.read_text(encoding="utf-8") != expected:
+        catalog_sha.write_text(expected, encoding="utf-8")
+        print(f"models.json.sha256 regenerated: {digest[:16]}…")
+    else:
+        print("models.json.sha256 already current")
+else:
+    print("models.json missing; skip sha256 regeneration", file=sys.stderr)
+    sys.exit(1)
 
 # setup.bat:注入版本号与主脚本 SHA256(固定版本下载 + 完整性校验)
 m = re.search(r'^VERSION = "([^"]+)"', src.read_text(encoding="utf-8"), re.M)

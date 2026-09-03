@@ -4,12 +4,15 @@
 # 腾讯云 Token Plan — 小白一键接入
 # Mac: 终端运行 | Windows: 右键→Python 打开
 import argparse
+import contextlib
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -21,7 +24,15 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 HOME = Path.home()
-VERSION = "2.4.0"
+VERSION = "2.5.0"
+
+# 退出码契约(对齐 thcli 的纪律:失败路径必须非 0 且错误进提示区,
+# 脚本/CI 无需解析随语言变化的文案即可判断成败):
+#   0 = 成功   1 = 用户取消   2 = 环境不满足   3 = 部分/全部工具配置失败
+EXIT_OK = 0
+EXIT_USER_CANCEL = 1
+EXIT_ENV = 2
+EXIT_CONFIG_FAILED = 3
 RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -37,9 +48,16 @@ INSTALL_TIMEOUT = 600
 
 IS_WINDOWS = sys.platform == "win32"
 
+# JSON 输出模式(--json):人类可读输出重定向到 stderr,stdout 只留给最终 JSON
+_JSON_MODE = False
+# --yes:跳过远程脚本执行确认(来源与 SHA256 仍会完整打印)
+_ASSUME_YES = False
+
 
 def clear() -> None:
     """Clear the terminal (cls on Windows, ANSI reset elsewhere)."""
+    if _JSON_MODE:
+        return
     if IS_WINDOWS:
         os.system("cls")
         return
@@ -162,6 +180,10 @@ class ToolSpec:
     check_exe: Optional[str] = None
     install_cmd: Optional[Union[tuple[str, ...], str]] = None
     install_cmd_win: Optional[Union[tuple[str, ...], str]] = None
+    # 远程安装脚本(macOS/Linux):走 run_remote_script(下载+SHA256+确认),
+    # 不再使用 curl|bash 盲管道;上游未发布固定哈希,故只做展示与确认
+    install_script: Optional[str] = None
+    install_script_args: Tuple[str, ...] = field(default_factory=tuple)
     win_manual: bool = False
     download_url: Optional[str] = None
     start_hint: str = ""
@@ -236,6 +258,46 @@ def _harden(path: Path) -> None:
         pass
 
 
+def _merge_model_lists(
+    existing: List[object], incoming: List[object], merge_key: str
+) -> List[object]:
+    """Merge two lists by identity key: user entries kept, ours replaced/appended."""
+    ours_keys = {
+        str(entry.get(merge_key))
+        for entry in incoming
+        if isinstance(entry, dict)
+    }
+    kept = [
+        entry
+        for entry in existing
+        if not (isinstance(entry, dict) and str(entry.get(merge_key)) in ours_keys)
+    ]
+    return kept + list(incoming)
+
+
+def _deep_merge_dicts(
+    existing: Dict[str, object],
+    incoming: Dict[str, object],
+    merge_key: Optional[str],
+) -> Dict[str, object]:
+    """递归深合并:dict 逐键下钻;双方均为 list 且给了 merge_key 时按标识
+    合并(保留用户条目,仅替换/追加我方条目);其余类型以新值覆盖。
+
+    (修复 2.4.0 及之前 existing.update() 的顶层浅合并——它会把用户
+    opencode/openclaw/claude 配置里同级的其它 provider 整块顶掉。)
+    """
+    result: Dict[str, object] = dict(existing)
+    for key, value in incoming.items():
+        old = result.get(key)
+        if isinstance(old, dict) and isinstance(value, dict):
+            result[key] = _deep_merge_dicts(old, value, merge_key)
+        elif merge_key and isinstance(old, list) and isinstance(value, list):
+            result[key] = _merge_model_lists(old, value, merge_key)
+        else:
+            result[key] = value
+    return result
+
+
 def write_json(
     path: Path,
     data: object,
@@ -244,7 +306,8 @@ def write_json(
 ) -> None:
     """Backup then write JSON; hardens to 0o600.
 
-    merge=True with dicts shallow-merges (existing.update).
+    merge=True with dicts deep-merges (dicts recurse per-key; nested lists
+    merge by merge_key when provided, else replace).
     merge=True with lists and merge_key set keeps user entries and
     replaces only entries whose merge_key matches ours (list order:
     user's non-conflicting entries first, then ours).
@@ -257,24 +320,13 @@ def write_json(
         except Exception:
             existing = None
         if isinstance(existing, dict) and isinstance(data, dict):
-            existing.update(data)
-            data = existing
+            data = _deep_merge_dicts(existing, data, merge_key)
         elif (
             isinstance(existing, list)
             and isinstance(data, list)
             and merge_key
         ):
-            ours_keys = {
-                str(entry.get(merge_key))
-                for entry in data
-                if isinstance(entry, dict)
-            }
-            kept = [
-                entry
-                for entry in existing
-                if not (isinstance(entry, dict) and str(entry.get(merge_key)) in ours_keys)
-            ]
-            data = kept + list(data)
+            data = _merge_model_lists(existing, data, merge_key)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     _harden(path)
 
@@ -382,6 +434,87 @@ def run_command(command: Union[Tuple[str, ...], str], message: str) -> bool:
     except Exception as exc:
         warn(f"{message} — 失败: {exc}")
         return False
+
+
+def _http_request(
+    url: str,
+    *,
+    method: str = "GET",
+    api_key: Optional[str] = None,
+    payload: Optional[Dict[str, object]] = None,
+    user_agent: Optional[str] = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Tuple[int, bytes]:
+    """所有出站 HTTP 的唯一入口(对齐 thcli core/http-agent.ts 的教训:
+    连接配置收敛到一处,避免各调用点自行拼装导致行为漂移——thcli 曾因
+    三处客户端漏传配置踩过 EPROTO)。
+
+    Returns (status, body):status 0 = 成功(body 已读全),否则为 HTTP
+    错误码;网络层失败抛 RuntimeError(带原因,提示口径由调用方决定)。
+    """
+    headers: Dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode()
+        method = "POST"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return 0, resp.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read() if exc.fp else b""
+        return exc.code, body
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def run_remote_script(url: str, script_args: Tuple[str, ...], tool_name: str) -> bool:
+    """下载远程安装脚本 → 展示来源与 SHA256 → 确认 → 本地执行。
+
+    (取代 `curl | bash` 盲管道:先完整落盘再执行,杜绝"边下边执行";
+    展示指纹供人工核对;非交互环境一律拒绝——thcli 的 fail-closed 口径。
+    上游官方脚本未发布固定哈希,无法做下载前校验,这里是该约束下
+    能做到的最大化。)
+    """
+    print(f"  {CYAN}→{RESET} 下载远程安装脚本: {url}")
+    try:
+        status, body = _http_request(
+            url, user_agent=f"tokenplan-setup/{VERSION}", timeout=60
+        )
+    except RuntimeError as exc:
+        warn(f"下载失败: {exc}")
+        return False
+    if status != 0:
+        warn(f"下载失败: HTTP {status}: {_format_api_error(body.decode(errors='ignore'))}")
+        return False
+    digest = hashlib.sha256(body).hexdigest()
+    fd, tmp_name = tempfile.mkstemp(suffix="-tokenplan-install.sh")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(body)
+        os.chmod(tmp_name, 0o700)
+        dim(f"来源: {url}")
+        dim(f"SHA256: {digest}")
+        dim(f"大小: {len(body)} 字节")
+        if not _ASSUME_YES:
+            warn("即将以当前用户身份执行该第三方脚本,请核对来源与哈希")
+            try:
+                confirmed = ask("  确认执行? (y/n): ").strip().lower()
+            except EOFError:
+                confirmed = "n"
+            if confirmed not in ("y", "yes"):
+                warn(f"已跳过 {tool_name}(远程脚本未获确认)")
+                return False
+        command = ("bash", tmp_name, *script_args)
+        return run_command(command, f"正在安装 {tool_name}(远程脚本)...")
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
 
 
 MODEL_CATALOG = {
@@ -603,10 +736,9 @@ TOOLS: Tuple[ToolSpec, ...] = (
         check_exe="hermes",
         start_hint="hermes",
         cfg_hint="~/.hermes/.env",
-        install_cmd=(
-            "bash",
-            "-c",
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use --skip-setup",
+        install_script="https://hermes-agent.nousresearch.com/install.sh",
+        install_script_args=(
+            "--skip-browser", "--skip-computer-use", "--skip-setup",
         ),
         win_manual=True,
         download_url="https://hermes-agent.nousresearch.com",
@@ -622,7 +754,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="CodeBuddy Code",
         backend="cli",
         check_exe="codebuddy",
-        install_cmd=("npm", "install", "-g", "@tencent-ai/codebuddy-code"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@tencent-ai/codebuddy-code"),
         start_hint="codebuddy",
         cfg_hint="~/.codebuddy/models.json",
         usage_lines=(
@@ -637,7 +769,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Claude Code",
         backend="cli",
         check_exe="claude",
-        install_cmd=("npm", "install", "-g", "@anthropic-ai/claude-code"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@anthropic-ai/claude-code"),
         start_hint="claude",
         cfg_hint="~/.claude/settings.json",
         usage_lines=(
@@ -658,7 +790,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         check_exe="opencode",
         start_hint="opencode",
         cfg_hint="~/.config/opencode/opencode.json",
-        install_cmd=("npm", "install", "-g", "opencode-ai"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "opencode-ai"),
         usage_lines=(
             "终端输入: opencode",
             "项目初始化: 在 OpenCode 中输入 /init",
@@ -673,12 +805,9 @@ TOOLS: Tuple[ToolSpec, ...] = (
         check_exe="openclaw",
         start_hint="openclaw",
         cfg_hint="~/.openclaw/openclaw.json",
-        install_cmd=(
-            "bash",
-            "-c",
-            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
-        ),
-        install_cmd_win=("npm", "install", "-g", "openclaw@latest"),
+        install_script="https://openclaw.ai/install.sh",
+        install_script_args=("--no-onboard",),
+        install_cmd_win=("npm", "install", "-g", "--ignore-scripts", "openclaw@latest"),
         download_url="https://openclaw.ai",
         usage_lines=(
             "终端输入: openclaw",
@@ -694,7 +823,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="DeepSeek Harness",
         backend="cli",
         check_exe="dsh",
-        install_cmd=("npm", "install", "-g", "@deepseek-ai/dsh@latest"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@deepseek-ai/dsh@latest"),
         start_hint="dsh web",
         cfg_hint="~/.dsh/settings.yaml",
         usage_lines=(
@@ -710,7 +839,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Codex CLI",
         backend="cli",
         check_exe="codex",
-        install_cmd=("npm", "install", "-g", "@openai/codex"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@openai/codex"),
         start_hint="codex",
         cfg_hint="~/.codex/config.toml",
         usage_lines=(
@@ -740,7 +869,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Kimi Code",
         backend="cli",
         check_exe="kimi",
-        install_cmd=("npm", "install", "-g", "@moonshot-ai/kimi-code"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@moonshot-ai/kimi-code"),
         start_hint="kimi",
         cfg_hint="~/.kimi-code/config.toml",
         usage_lines=(
@@ -755,7 +884,7 @@ TOOLS: Tuple[ToolSpec, ...] = (
         name="Grok CLI",
         backend="cli",
         check_exe="grok",
-        install_cmd=("npm", "install", "-g", "@xai-official/grok"),
+        install_cmd=("npm", "install", "-g", "--ignore-scripts", "@xai-official/grok"),
         start_hint="grok",
         cfg_hint="~/.grok/config.toml",
         usage_lines=(
@@ -798,9 +927,9 @@ TOOLS: Tuple[ToolSpec, ...] = (
 TOOL_BY_INDEX = {str(i + 1): tool for i, tool in enumerate(TOOLS)}
 TOOL_BY_KEY = {tool.key: tool for tool in TOOLS}
 
+# hermes/openclaw 的远程脚本改由 _http_request(Python 内建)下载,
+# 不再依赖系统 curl;npm 类工具依赖 Node 自带的 npx
 TOOL_DEPENDENCY_REGISTRY = {
-    "hermes": ("curl",),
-    "openclaw": ("curl",),
     "dsh": ("npx",),
 }
 
@@ -1048,13 +1177,18 @@ def should_manual_download(tool: ToolSpec) -> bool:
 
 
 def supports_auto_install(tool: ToolSpec) -> bool:
-    """True when the backend allows auto-install and a command is available."""
+    """True when the backend allows auto-install and an install path exists."""
     adapter = get_backend_adapter(tool)
-    return bool(adapter.get("auto_install")) and bool(get_install_command(tool))
+    has_path = bool(get_install_command(tool)) or bool(
+        tool.install_script and not IS_WINDOWS
+    )
+    return bool(adapter.get("auto_install")) and has_path
 
 
 def install_tool(tool: ToolSpec) -> bool:
-    """Run the install command (npm gets a private cache; .cmd shims rerouted on Windows)."""
+    """Install a tool: remote scripts download-then-confirm; npm gets a private cache."""
+    if tool.install_script and not IS_WINDOWS and not should_manual_download(tool):
+        return run_remote_script(tool.install_script, tool.install_script_args, tool.name)
     command = get_install_command(tool)
     if not command:
         return True
@@ -1091,7 +1225,7 @@ def render_usage_lines(tool: ToolSpec, base_url: str, api_key: str) -> List[str]
 
 
 def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
-    """Check OS/Node/npm/npx/code/curl for the selected tools; returns readiness."""
+    """Check OS/Node/npm/npx/code for the selected tools; returns readiness."""
     print("  ── 前置检查 ──")
     print()
 
@@ -1123,10 +1257,6 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
         for tool in selected_tools
     )
     needs_code = any(requires_backend_dependency(tool, "code") for tool in selected_tools)
-    needs_curl = (
-        not IS_WINDOWS
-        and any(requires_backend_dependency(tool, "curl") for tool in selected_tools)
-    )
     prerequisites_ready = True
     ok("Python 3")
 
@@ -1166,13 +1296,6 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
         else:
             warn("未找到 VS Code CLI：插件类工具将无法自动安装")
 
-    if needs_curl:
-        if shutil.which("curl"):
-            ok("curl")
-        else:
-            prerequisites_ready = False
-            warn("未安装 curl，Hermes 自动安装可能失败")
-
     if shutil.which("git"):
         ok("git")
 
@@ -1181,23 +1304,49 @@ def check_prerequisites(selected_tools: Iterable[ToolSpec]) -> bool:
 
 
 # 远程模型目录:优先于内置 MODEL_CATALOG,由 refresh_remote_catalog() 填充。
-# 仓库根目录的 models.json 通过 jsDelivr CDN 分发,更新模型只需提交一次 JSON。
+# 仓库根目录的 models.json 通过 jsDelivr CDN 分发,更新模型只需提交一次 JSON;
+# models.json.sha256 由 scripts/sync_npm_lib.py 自动再生,二者必须一起提交
+# (tests 的 consistency 组会校验一致,防止"改了目录忘了刷哈希")。
 REMOTE_CATALOG_URL = (
     "https://cdn.jsdelivr.net/gh/zmq1121/tokenplan-quick-setup@main/models.json"
 )
+REMOTE_CATALOG_SHA256_URL = REMOTE_CATALOG_URL + ".sha256"
 _REMOTE_CATALOG: Optional[Dict[str, Dict[str, object]]] = None
 _REMOTE_LATEST_VERSION: Optional[str] = None
 
 
+def _parse_sha256(text: str) -> Optional[str]:
+    """Extract the first 64-hex digest from a .sha256 file body (sha256sum format)."""
+    match = re.search(r"\b[0-9a-fA-F]{64}\b", text)
+    return match.group(0).lower() if match else None
+
+
 def refresh_remote_catalog() -> None:
-    """Fetch the remote model catalog; keep built-in catalog on any failure."""
+    """Fetch the remote model catalog with SHA256 integrity verification.
+
+    (对齐 thcli skills 分发的纪律:清单与内容分离,哈希对不上就不用。
+    .sha256 拿不到或不匹配 → 一律回退内置目录,绝不下发无法证明
+    完整性的远程内容——CDN 缓存错位与劫持同归此路径。)
+    """
     global _REMOTE_CATALOG, _REMOTE_LATEST_VERSION
     try:
-        req = urllib.request.Request(
-            REMOTE_CATALOG_URL, headers={"User-Agent": f"tokenplan-setup/{VERSION}"}
+        status, body = _http_request(
+            REMOTE_CATALOG_URL, user_agent=f"tokenplan-setup/{VERSION}"
         )
-        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode(errors="ignore"))
+        if status != 0:
+            return
+        digest_status, digest_body = _http_request(
+            REMOTE_CATALOG_SHA256_URL, user_agent=f"tokenplan-setup/{VERSION}"
+        )
+        if digest_status != 0:
+            warn("远程目录完整性无法校验(获取 models.json.sha256 失败),已回退内置目录")
+            return
+        expected = _parse_sha256(digest_body.decode(errors="ignore"))
+        actual = hashlib.sha256(body).hexdigest()
+        if expected is None or expected != actual:
+            warn("远程目录 SHA256 不匹配(疑似 CDN 缓存错位或内容异常),已回退内置目录")
+            return
+        payload = json.loads(body.decode(errors="ignore"))
         plans = payload.get("plans") if isinstance(payload, dict) else None
         if isinstance(plans, dict) and plans:
             _REMOTE_CATALOG = plans
@@ -1253,13 +1402,13 @@ def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]
     """
     global _POSTPAID_DISCOVERED
     try:
-        req = urllib.request.Request(
-            f"{base_url}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            method="GET",
+        status, body = _http_request(
+            f"{base_url}/models", api_key=api_key, method="GET"
         )
-        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode(errors="ignore"))
+        if status != 0:
+            warn(f"API 返回错误 [{status}]: {_format_api_error(body.decode(errors='ignore')[:400])}")
+            return None
+        payload = json.loads(body.decode(errors="ignore"))
         data = payload.get("data") if isinstance(payload, dict) else None
         ids = [
             item["id"]
@@ -1269,11 +1418,10 @@ def discover_postpaid_models(base_url: str, api_key: str) -> Optional[List[str]]
         if ids:
             _POSTPAID_DISCOVERED = ids
             return ids
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
-        warn(f"API 返回错误 [{exc.code}]: {_format_api_error(body)}")
-    except Exception as exc:
+    except RuntimeError as exc:
         warn(f"连接失败: {exc}")
+    except Exception as exc:
+        warn(f"解析失败: {exc}")
     return None
 
 
@@ -1417,27 +1565,22 @@ def verify_api_key(base_url: str, api_key: str, plan: PlanSpec) -> bool:
     spinner = Spinner("验证 API Key...")
     spinner.start()
     try:
-        req = urllib.request.Request(
+        status, body = _http_request(
             f"{base_url}/chat/completions",
-            data=json.dumps(
-                {
-                    "model": get_model_catalog(plan.key)["default"],
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "hi"}],
-                }
-            ).encode(),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
+            api_key=api_key,
+            payload={
+                "model": get_model_catalog(plan.key)["default"],
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
         )
-        urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT)
-        spinner.stop(success=True)
-        return True
-    except urllib.error.HTTPError as exc:
+        if status == 0:
+            spinner.stop(success=True)
+            return True
         spinner.stop(success=False)
-        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
-        warn(f"API 返回错误 [{exc.code}]: {_format_api_error(body)}")
+        warn(f"API 返回错误 [{status}]: {_format_api_error(body.decode(errors='ignore')[:400])}")
         return False
-    except Exception as exc:
+    except RuntimeError as exc:
         spinner.stop(success=False)
         warn(f"连接失败: {exc}")
         return False
@@ -1461,6 +1604,10 @@ def configure_codebuddy(base_url: str, api_key: str, plan: PlanSpec) -> None:
                 for model_id in model_ids
             ]
         },
+        # 按模型 id 合并:保留用户自建条目(与 WorkBuddy 同一标准;
+        # 此前全量重写会静默丢弃用户手填的模型)
+        merge=True,
+        merge_key="id",
     )
     write_json(
         cfg_path(".codebuddy", "settings.json"),
@@ -2395,7 +2542,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--api-key",
         dest="api_key",
-        help="直接传入 API Key；不传则交互输入",
+        help="直接传入 API Key；不传则读环境变量 TOKENPLAN_API_KEY，再退回交互输入"
+             "（注意：命令行参数会留在 shell 历史里，自动化场景推荐环境变量）",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="结构化输出(setup/doctor)：过程日志转 stderr，stdout 只输出结果 JSON，密钥一律打码",
+    )
+    parser.add_argument(
+        "--deep",
+        action="store_true",
+        help="doctor 子命令：端到端验证（真实调用一次对话接口；需配合 --plan 与 API Key）",
     )
     parser.add_argument(
         "--tools",
@@ -2457,18 +2615,30 @@ def resolve_tools_from_arg(raw: Optional[str]) -> Optional[List[ToolSpec]]:
     return selected
 
 
-def run_doctor(selected_tools: List[ToolSpec]) -> int:
-    """Read-only diagnosis: prerequisites plus per-tool install status."""
+def run_doctor(
+    selected_tools: List[ToolSpec],
+    deep: bool = False,
+    plan: Optional[PlanSpec] = None,
+    api_key: str = "",
+    rows: Optional[List[Dict[str, object]]] = None,
+) -> int:
+    """Read-only diagnosis: prerequisites plus per-tool install status.
+
+    退出码:0=全部健康,2=前置条件不满足,3=存在"已安装但配置缺失"的工具
+    或 --deep 端到端验证失败(对齐 thcli:doctor 可被脚本判断,而非只读文案)。
+    rows 供 --json 模式收集结构化结果(不影响文本输出)。
+    """
     clear()
     print()
     print("  ╔══════════════════════════════════════════════╗")
     print("  ║           Token Plan 环境诊断               ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
-    check_prerequisites(selected_tools)
+    prerequisites_ready = check_prerequisites(selected_tools)
     print()
     print("  ── 工具状态 ──")
     print()
+    misconfigured = 0
     for tool in selected_tools:
         installed = is_tool_installed(tool)
         configured = probe_config(tool)
@@ -2483,6 +2653,19 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
             status = "已安装"
         else:
             status = "未安装"
+        if installed and configured is False:
+            misconfigured += 1
+        if rows is not None:
+            rows.append(
+                {
+                    "key": tool.key,
+                    "name": tool.name,
+                    "installed": installed,
+                    "configured": configured,
+                    "status": status,
+                    "config_path": tool.cfg_hint,
+                }
+            )
         print(f"  {tool.name}: {status}")
         print(f"    配置位置: {tool.cfg_hint}")
         if installed and configured is False:
@@ -2496,6 +2679,8 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
                 print(f"    手动安装: {tool.download_url}")
         elif not installed and supports_auto_install(tool):
             print("    将自动安装: 是")
+            if tool.install_script and not IS_WINDOWS:
+                print(f"    安装方式: 远程脚本（{tool.install_script}，下载后校验确认再执行）")
             command = get_install_command(tool)
             if command:
                 if isinstance(command, tuple):
@@ -2505,7 +2690,40 @@ def run_doctor(selected_tools: List[ToolSpec]) -> int:
         elif not installed:
             print("    将自动安装: 否")
         print()
-    return 0
+
+    deep_failed = False
+    if deep:
+        if not plan:
+            warn("doctor --deep 需要 --plan 指定要验证的套餐(如 --plan enterprise-pro)")
+            return EXIT_ENV
+        if not api_key:
+            warn("doctor --deep 需要 API Key(--api-key 或环境变量 TOKENPLAN_API_KEY)")
+            return EXIT_ENV
+        print("  ── 端到端验证（真实调用一次 /chat/completions） ──")
+        print()
+        default_model = str(get_model_catalog(plan.key)["default"])
+        passed, reason = test_model(plan.base_url, api_key, default_model)
+        if rows is not None:
+            rows.append(
+                {
+                    "key": "e2e",
+                    "name": f"端到端验证({plan.key}/{default_model})",
+                    "passed": passed,
+                    "reason": reason,
+                }
+            )
+        if passed:
+            ok(f"{default_model} 端到端可用")
+        else:
+            warn(f"{default_model} 端到端失败: {reason}")
+        deep_failed = not passed
+        print()
+
+    if not prerequisites_ready:
+        return EXIT_ENV
+    if misconfigured or deep_failed:
+        return EXIT_CONFIG_FAILED
+    return EXIT_OK
 
 
 def collect_latest_backups() -> Dict[str, str]:
@@ -2666,13 +2884,12 @@ def fetch_remote_models(base_url: str, api_key: str) -> Optional[List[str]]:
     if "/plan/v3" in base_url and "lkeap" not in base_url:
         return None  # tokenhub plan 域不提供 /models(已探活确认)
     try:
-        req = urllib.request.Request(
-            f"{base_url}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            method="GET",
+        status, body = _http_request(
+            f"{base_url}/models", api_key=api_key, method="GET"
         )
-        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode(errors="ignore"))
+        if status != 0:
+            return None
+        payload = json.loads(body.decode(errors="ignore"))
         data = payload.get("data") if isinstance(payload, dict) else None
         if isinstance(data, list):
             ids = [item.get("id") for item in data if isinstance(item, dict) and item.get("id")]
@@ -2689,32 +2906,27 @@ def _test_model_once(
 ) -> Tuple[bool, str]:
     """Single verification attempt; optionally retry once on 5xx gateway errors."""
     try:
-        req = urllib.request.Request(
+        status, body = _http_request(
             f"{base_url}/chat/completions",
-            data=json.dumps(
-                {
-                    "model": model,
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "hi"}],
-                }
-            ).encode(),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
+            api_key=api_key,
+            payload={
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
         )
-        urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT)
-        return True, ""
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="ignore")[:400] if exc.fp else ""
-        if retry_no5xx and 500 <= exc.code <= 599:
+        if status == 0:
+            return True, ""
+        if retry_no5xx and 500 <= status <= 599:
             # 网关瞬时错误(upstream_error 等):稍候重试一次,避免误报
             time.sleep(2)
             return _test_model_once(base_url, api_key, model, retry_no5xx=False,
-                                    prev_error=f"HTTP {exc.code}")
-        detail = f"HTTP {exc.code}: {_format_api_error(body, limit=100)}"
-        if prev_error and 500 <= exc.code <= 599:
+                                    prev_error=f"HTTP {status}")
+        detail = f"HTTP {status}: {_format_api_error(body.decode(errors='ignore'), limit=100)}"
+        if prev_error and 500 <= status <= 599:
             return False, f"{detail}（重试后仍失败,疑似服务端瞬时故障）"
         return False, detail
-    except Exception as exc:
+    except RuntimeError as exc:
         return False, str(exc)
 
 
@@ -2753,20 +2965,14 @@ def verify_models(
     return results
 
 
-def main() -> None:
-    """CLI entry: parse args, verify key, install and configure selected tools."""
-    enable_windows_ansi()
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    if args.command == "doctor":
-        doctor_tools = resolve_tools_from_arg(args.tools)
-        if doctor_tools is None:
-            doctor_tools = list(TOOLS)
-        run_doctor(doctor_tools)
-        return
-    if args.command == "uninstall":
-        run_uninstall(args.yes)
-        return
+def _run_setup_flow(args: argparse.Namespace) -> Tuple[int, Dict[str, object]]:
+    """The setup/repair flow; returns (exit_code, machine-readable result).
+
+    (拆出 main 供 --json 复用:人类可读输出在外层被重定向到 stderr,
+    返回值携带结构化结果——对齐 thcli 的 --json 口径:密钥在 JSON 里
+    一律打码,因为 JSON 会被转发、落盘、进对话历史。)
+    """
+    result: Dict[str, object] = {"version": VERSION, "command": args.command}
 
     clear()
     print()
@@ -2782,6 +2988,7 @@ def main() -> None:
     plan = resolve_plan_from_arg(args.plan) or choose_plan()
     base_url = plan.base_url
     key_url = plan.key_url
+    result.update({"plan": plan.key, "plan_name": plan.display_name, "base_url": base_url})
 
     print("  ── 第二步：输入 API Key ──")
     print()
@@ -2789,24 +2996,35 @@ def main() -> None:
     print()
     info("建议使用有权限的完整 API Key，粘贴时请避免前后空格")
     print()
+    # Key 解析优先级:--api-key 参数 > 环境变量 TOKENPLAN_API_KEY > 交互输入
+    # (命令行参数会留在 shell 历史里,自动化场景推荐环境变量)
     api_key = args.api_key.strip() if args.api_key else ""
     if api_key and len(api_key) < 10:
         print(f"\n  {YELLOW}❌ --api-key 传入的 Key 无效（长度过短），请检查后重试。{RESET}")
-        return
+        return EXIT_USER_CANCEL, result
+    if not api_key:
+        env_key = os.environ.get("TOKENPLAN_API_KEY", "").strip()
+        if env_key:
+            if len(env_key) >= 10:
+                info("已从环境变量 TOKENPLAN_API_KEY 读取 API Key")
+                api_key = env_key
+            else:
+                warn("环境变量 TOKENPLAN_API_KEY 中的 Key 长度过短，已忽略")
     while not api_key:
         try:
             api_key = ask("  请粘贴 API Key: ").strip()
         except EOFError:
             print(f"\n  {YELLOW}未输入 API Key，已取消。{RESET}")
-            return
+            return EXIT_USER_CANCEL, result
         if not api_key:
             print(f"\n  {YELLOW}未输入 API Key，已取消。{RESET}")
-            return
+            return EXIT_USER_CANCEL, result
         if len(api_key) < 10:
             warn("API Key 看起来不完整（长度过短），请重新粘贴完整 Key")
             print()
             api_key = ""
             continue
+    result["api_key"] = mask_secret(api_key)
     print()
 
     if not verify_api_key(base_url, api_key, plan):
@@ -2817,7 +3035,7 @@ def main() -> None:
         except EOFError:
             confirmed = "n"
         if not args.yes and confirmed != "y":
-            return
+            return EXIT_USER_CANCEL, result
     else:
         ok("API Key 验证通过")
     print()
@@ -2826,7 +3044,7 @@ def main() -> None:
     if _REMOTE_CATALOG:
         info(f"模型目录已更新（远程 {sum(len(p.get('display', ())) for p in _REMOTE_CATALOG.values())} 条）")
     else:
-        info("使用内置模型目录（远程目录不可用或未配置）")
+        info("使用内置模型目录（远程目录不可用或未通过完整性校验）")
     notify_upgrade_available()
     print()
 
@@ -2837,7 +3055,7 @@ def main() -> None:
             ids = discover_postpaid_models(base_url, api_key)
             if not ids:
                 warn("后付费模式需要联网获取模型列表,无法继续")
-                return
+                return EXIT_ENV, result
         chat = postpaid_chat_models()
         ok(f"后付费模型列表已获取（{len(_POSTPAID_DISCOVERED)} 个,其中聊天模型 {len(chat)} 个）")
         if args.models:
@@ -2856,6 +3074,7 @@ def main() -> None:
                 warn(f"以下目录模型未出现在 API 模型列表中（可能已下线）: {', '.join(missing)}")
             else:
                 ok(f"API 模型列表可用（{len(remote_models)} 个），目录模型全部在列")
+    result["models"] = get_model_ids(plan.key)
     print()
 
     if args.models and plan.key not in ("postpaid", "postpaid-intl"):
@@ -2869,12 +3088,12 @@ def main() -> None:
         selected_tools = choose_tools()
     if not selected_tools:
         warn("未选择任何工具，脚本已结束")
-        return
+        return EXIT_USER_CANCEL, result
 
     prerequisites_ready = check_prerequisites(selected_tools)
     if not prerequisites_ready:
         warn("关键前置条件未满足，请先按上面的提示完成安装，再重新运行本安装器")
-        return
+        return EXIT_ENV, result
 
     print(f"  ── 正在配置 {len(selected_tools)} 个工具 ──")
     print()
@@ -3024,16 +3243,88 @@ def main() -> None:
             print(f"    {model_line}")
         print()
 
+    verified: Dict[str, Tuple[bool, str]] = {}
     if installed and args.verify_models != "off":
-        verify_models(base_url, api_key, plan, mode=args.verify_models)
+        verified = verify_models(base_url, api_key, plan, mode=args.verify_models)
+
+    result["tools"] = (
+        [
+            {"key": t.key, "name": t.name, "status": "configured"}
+            for t in installed
+        ]
+        + [
+            {"key": t.key, "name": t.name, "status": "failed", "error": reason}
+            for t, reason in failed
+        ]
+        + [
+            {"key": t.key, "name": t.name, "status": "skipped"}
+            for t in skipped
+        ]
+    )
+    result["verified"] = {m: passed for m, (passed, _) in verified.items()}
+    exit_code = EXIT_CONFIG_FAILED if failed else EXIT_OK
+    return exit_code, result
+
+
+def main() -> int:
+    """CLI entry: parse args, verify key, install and configure selected tools.
+
+    退出码:0=成功 1=用户取消 2=环境不满足 3=部分工具配置失败/诊断异常。
+    """
+    global _JSON_MODE, _ASSUME_YES
+    enable_windows_ansi()
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    _JSON_MODE = bool(args.json)
+    _ASSUME_YES = bool(args.yes)
+
+    if args.command == "doctor":
+        doctor_tools = resolve_tools_from_arg(args.tools)
+        if doctor_tools is None:
+            doctor_tools = list(TOOLS)
+        deep_plan = resolve_plan_from_arg(args.plan) if args.deep else None
+        deep_key = ""
+        if args.deep:
+            deep_key = (args.api_key or os.environ.get("TOKENPLAN_API_KEY", "")).strip()
+        if _JSON_MODE:
+            rows: List[Dict[str, object]] = []
+            with contextlib.redirect_stdout(sys.stderr):
+                code = run_doctor(
+                    doctor_tools, deep=args.deep, plan=deep_plan,
+                    api_key=deep_key, rows=rows,
+                )
+            print(json.dumps(
+                {"version": VERSION, "command": "doctor", "tools": rows, "exit_code": code},
+                ensure_ascii=False, indent=2,
+            ))
+            return code
+        return run_doctor(
+            doctor_tools, deep=args.deep, plan=deep_plan, api_key=deep_key
+        )
+    if args.command == "uninstall":
+        return run_uninstall(args.yes)
+
+    if _JSON_MODE:
+        # stdout 只留给最终 JSON;过程日志(安装输出/交互提示)全部转 stderr,
+        # 可观测性不减,管道消费者拿到的是干净的结构化结果
+        with contextlib.redirect_stdout(sys.stderr):
+            code, result = _run_setup_flow(args)
+        result["exit_code"] = code
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return code
+    code, result = _run_setup_flow(args)
+    return code
 
 
 if __name__ == "__main__":
+    _exit_code = EXIT_OK
     try:
-        main()
-        if sys.stdin.isatty():
+        _exit_code = main()
+        if sys.stdin.isatty() and not _JSON_MODE:
             input("  按回车退出...")
     except KeyboardInterrupt:
         print(f"\n  {YELLOW}已取消{RESET}")
+        _exit_code = EXIT_USER_CANCEL
     except EOFError:
         pass
+    sys.exit(_exit_code)

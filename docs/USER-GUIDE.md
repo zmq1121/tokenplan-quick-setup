@@ -111,6 +111,28 @@ bash setup.command repair      # 修复:重写配置文件,不重新安装程序
 bash setup.command uninstall   # 卸载:从备份还原全部修改
 ```
 
+诊断的退出码:`0` 全部健康,`2` 环境前置不满足,`3` 存在已安装但配置缺失的工具。
+
+**端到端诊断(doctor --deep)**
+
+普通 doctor 只检查"装没装、配没配";加 `--deep` 会用你的 API Key 真实调用一次对话接口,验证套餐默认模型端到端可用(Key 是否被吊销、套餐是否过期、模型是否下线,一次说清):
+
+```bash
+bash setup.command doctor --deep --plan enterprise-pro --api-key <KEY>
+# 或使用环境变量
+TOKENPLAN_API_KEY=<KEY> bash setup.command doctor --deep --plan enterprise-pro
+```
+
+**自动化/脚本场景**
+
+- API Key 优先级:`--api-key` 参数 > 环境变量 `TOKENPLAN_API_KEY` > 交互输入。命令行参数会留在 shell 历史里,推荐环境变量
+- `--json`(setup 与 doctor 支持):过程日志转 stderr,stdout 只输出结构化结果,密钥自动打码,便于 jq 解析或落盘存档
+- 退出码契约:`0` 成功,`1` 用户取消,`2` 环境不满足,`3` 部分工具配置失败
+
+```bash
+TOKENPLAN_API_KEY=<KEY> bash setup.command --plan enterprise-pro --yes --json > result.json 2> setup.log
+```
+
 ## 常见问题
 
 **Mac 双击 setup.command 无反应,或被文本编辑器打开**
@@ -155,4 +177,4 @@ bash setup.command --plan postpaid --api-key <KEY> --models glm-5.3,kimi-k3 --ye
 
 **企业安全软件告警**
 
-本工具仅执行三类操作:安装 AI 编程工具、写入工具配置文件、备份原配置;不收集信息、不外传数据。如有需要,可将工具路径提交 IT 部门审核。
+本工具仅执行三类操作:安装 AI 编程工具、写入工具配置文件、备份原配置;不收集信息、不外传数据。安装来源均可审计:npm 走官方源并统一 `--ignore-scripts`;远程安装脚本(Hermes/OpenClaw,仅 macOS)先下载展示 SHA256 指纹、经确认后才执行。如有需要,可将工具路径提交 IT 部门审核。

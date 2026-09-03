@@ -716,24 +716,29 @@ def test_main_interactions():
         else:
             it = iter(answers)
             mod.ask = lambda p="": next(it)
+        # 远程脚本安装走本地桩:交互测试不触网(真实路径由 remote-script 组覆盖)。
+        # 远程脚本在非交互下本来就 fail-closed,桩只是省掉真实下载。
+        mod.run_remote_script = lambda url, sargs, name: False
+        # 宿主机可能残留 TOKENPLAN_API_KEY(真实运行写入),不清理会改变交互顺序
+        os.environ.pop("TOKENPLAN_API_KEY", None)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            mod.main()
-        return buf.getvalue()
+            code = mod.main()
+        return buf.getvalue(), code
 
-    out = run(["x", "--plan", "enterprise-pro"],
-              ["sk-fake-key-1234567890", "1", "none"])
+    out, _ = run(["x", "--plan", "enterprise-pro"],
+                 ["sk-fake-key-1234567890", "1", "none"])
     check("交互: 第三步运行模式", "第三步：选择运行模式" in out)
     check("交互: 第四步工具菜单", "第四步：选择工具" in out)
     check("交互: none 取消", "未选择任何工具" in out)
 
-    out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
+    out, _ = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890"])
     check("EOF: run mode 默认", "无输入，默认" in out)
     check("EOF: 工具默认全部", "默认选择全部工具" in out)
     check("EOF: 配置 12 个", "正在配置 12 个工具" in out)
 
-    out = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
-               "--tools", "codex"], ["1"])
+    out, _ = run(["x", "--plan", "enterprise-pro", "--api-key", "sk-fake-key-1234567890",
+                  "--tools", "codex"], ["1"])
     check("--tools: 只配指定工具", "正在配置 1 个工具" in out and "Codex 已配置" in out)
 
     # 手动下载类但有配置器的工具(WorkBuddy):配置必须照写,不能只提示下载
@@ -753,8 +758,8 @@ def test_main_interactions():
         mod._REMOTE_CATALOG = None
         _real_refresh = mod.refresh_remote_catalog
         mod.refresh_remote_catalog = lambda: None
-        out = run(["x", "--plan", "personal-general", "--api-key", "sk-fake-key-1234567890",
-                   "--tools", "workbuddy"], ["1"])
+        out, _ = run(["x", "--plan", "personal-general", "--api-key", "sk-fake-key-1234567890",
+                      "--tools", "workbuddy"], ["1"])
         mod.refresh_remote_catalog = _real_refresh
         check("WorkBuddy: 手动下载类仍写配置", "配置已写入" in out)
         wb_models = json.loads((wb_home / ".workbuddy" / "models.json").read_text())
@@ -763,11 +768,11 @@ def test_main_interactions():
         _sp.run = _real
 
     # 短 key flag 明确报错
-    out = run(["x", "--plan", "enterprise-pro", "--api-key", "abc"])
+    out, _ = run(["x", "--plan", "enterprise-pro", "--api-key", "abc"])
     check("短key: flag 明确报错", "--api-key 传入的 Key 无效" in out)
 
     # 短 key 交互重试
-    out = run(["x", "--plan", "enterprise-pro"], ["short", ""])
+    out, _ = run(["x", "--plan", "enterprise-pro"], ["short", ""])
     check("短key: 交互提示重输", "长度过短" in out)
 
 
@@ -789,6 +794,16 @@ def test_repo_consistency():
           h_m and h_m.group(1).lower() == _hl.sha256(SCRIPT.read_bytes()).hexdigest())
     check("setup.bat: 下载 URL 固定版本(非 @main)",
           "@main" not in bat_text and "releases/download" in bat_text)
+
+    # models.json.sha256 与 models.json 严格对应(远程目录完整性校验依赖;
+    # 改 models.json 忘刷哈希会被这里拦下,正常流程由 sync_npm_lib.py 自动再生)
+    sha_path = REPO / "models.json.sha256"
+    sha_text = sha_path.read_text(encoding="utf-8") if sha_path.exists() else ""
+    sha_m = re.search(r"[0-9a-fA-F]{64}", sha_text)
+    check("models.json.sha256 存在且与 models.json 一致",
+          bool(sha_m)
+          and sha_m.group(0).lower()
+          == _hl.sha256((REPO / "models.json").read_bytes()).hexdigest())
 
     src = SCRIPT.read_text(encoding="utf-8")
     ver = re.search(r'^VERSION = "([^"]+)"', src, re.M)
@@ -869,6 +884,489 @@ def test_remote_catalog():
     check("目录: 网络失败安全回退", mod2._REMOTE_CATALOG is None)
 
 
+# ---------------------------------------------------------------------------
+# 测试组: write_json 深合并(2.5.0:修复顶层浅合并顶掉用户同级配置)
+
+def test_deep_merge():
+    mod = load_module()
+    tmp = sandbox(mod)
+
+    # dict 深合并:用户同级 provider 保留,我方 provider 嵌套更新
+    p = tmp / "opencode.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "model": "openai/gpt-5",
+        "provider": {
+            "openai": {"name": "OpenAI", "options": {"apiKey": "sk-user"}},
+            "tokenplan": {"name": "旧名", "options": {"apiKey": "sk-old"}},
+        },
+    }, ensure_ascii=False))
+    mod.write_json(p, {
+        "model": "tokenplan/glm-5.2",
+        "provider": {
+            "tokenplan": {"name": "Tencent Cloud Token Plan",
+                          "options": {"apiKey": "sk-new"}},
+        },
+    }, merge=True)
+    data = json.loads(p.read_text())
+    check("深合并: 用户同级 provider 保留",
+          data["provider"]["openai"]["options"]["apiKey"] == "sk-user")
+    check("深合并: 我方 provider 嵌套更新",
+          data["provider"]["tokenplan"]["options"]["apiKey"] == "sk-new")
+    check("深合并: 我方顶层键生效", data["model"] == "tokenplan/glm-5.2")
+
+    # env 字典深合并:用户自定义环境变量不丢
+    p2 = tmp / "settings.json"
+    p2.write_text(json.dumps(
+        {"env": {"USER_CUSTOM": "keep-me"}, "other": 1}, ensure_ascii=False))
+    mod.write_json(p2, {"env": {"TOKENPLAN_API_KEY": "sk-x"}}, merge=True)
+    d2 = json.loads(p2.read_text())
+    check("深合并: 用户 env 键保留", d2["env"]["USER_CUSTOM"] == "keep-me")
+    check("深合并: 我方 env 键写入", d2["env"]["TOKENPLAN_API_KEY"] == "sk-x")
+    check("深合并: 无关顶层键保留", d2["other"] == 1)
+
+    # 嵌套 list + merge_key:codebuddy models.json 的结构({"models": [...]})
+    p3 = tmp / "codebuddy-models.json"
+    p3.write_text(json.dumps({"models": [
+        {"id": "user-own", "apiKey": "sk-user"},
+        {"id": "glm-5.2", "apiKey": "sk-old"},
+    ]}, ensure_ascii=False))
+    mod.write_json(p3, {"models": [
+        {"id": "glm-5.2", "apiKey": "sk-new"},
+        {"id": "glm-5.3", "apiKey": "sk-new"},
+    ]}, merge=True, merge_key="id")
+    d3 = {e["id"]: e["apiKey"] for e in json.loads(p3.read_text())["models"]}
+    check("深合并: 嵌套 list 按 id 更新", d3["glm-5.2"] == "sk-new")
+    check("深合并: 嵌套 list 追加新项", d3.get("glm-5.3") == "sk-new")
+    check("深合并: 嵌套 list 用户条目保留", d3["user-own"] == "sk-user")
+
+
+def test_codebuddy_user_models_preserved():
+    """codebuddy models.json 此前全量重写,用户自建模型会丢(与 WorkBuddy 双标)。"""
+    mod = load_module()
+    tmp = sandbox(mod)
+    mod._REMOTE_CATALOG = None
+    plan = mod.PLAN_CATALOG["3"]
+
+    models = tmp / ".codebuddy" / "models.json"
+    models.parent.mkdir(parents=True, exist_ok=True)
+    models.write_text(json.dumps({"models": [
+        {"id": "user-own", "name": "自建", "apiKey": "sk-user", "url": "https://x"},
+    ]}, ensure_ascii=False))
+
+    import contextlib, io as _io
+    with contextlib.redirect_stdout(_io.StringIO()):
+        mod.configure_codebuddy(plan.base_url, "sk-cb-1234567890", plan)
+
+    data = json.loads(models.read_text())
+    ids = [e["id"] for e in data["models"]]
+    check("codebuddy: 套餐模型全部写入",
+          set(mod.get_model_ids("enterprise-pro")) <= set(ids))
+    check("codebuddy: 用户自建模型保留",
+          "user-own" in ids and
+          [e for e in data["models"] if e["id"] == "user-own"][0]["apiKey"] == "sk-user")
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 安装策略(供应链加固)
+
+def test_install_policy():
+    mod = load_module()
+    npm_cmds = []
+    for t in mod.TOOLS:
+        for cmd in (t.install_cmd, t.install_cmd_win):
+            if isinstance(cmd, tuple) and cmd and cmd[0] == "npm":
+                npm_cmds.append((t.key, cmd))
+    check("安装策略: npm 工具全覆盖(>=8)", len(npm_cmds) >= 8)
+    check("安装策略: npm 安装一律 --ignore-scripts(拦截 lifecycle 脚本)",
+          all("--ignore-scripts" in cmd for _, cmd in npm_cmds))
+    check("安装策略: 无 curl|bash 盲管道",
+          all(
+              "curl" not in " ".join(str(part) for part in (cmd or ()))
+              for t in mod.TOOLS
+              for cmd in (t.install_cmd, t.install_cmd_win)
+          ))
+    hermes = mod.TOOL_BY_KEY["hermes"]
+    openclaw = mod.TOOL_BY_KEY["openclaw"]
+    check("安装策略: hermes 走受控远程脚本",
+          hermes.install_script is not None and hermes.install_cmd is None)
+    check("安装策略: openclaw 走受控远程脚本", openclaw.install_script is not None)
+    check("安装策略: 远程脚本工具支持自动安装(macOS/Linux)",
+          mod.supports_auto_install(hermes) or mod.IS_WINDOWS)
+    check("安装策略: 不再依赖系统 curl",
+          "curl" not in mod.TOOL_DEPENDENCY_REGISTRY.get("hermes", ()))
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 远程脚本执行(fail-closed + 指纹展示)
+
+def test_remote_script():
+    mod = load_module()
+    sandbox(mod)
+    import contextlib, hashlib as _hl, io as _io
+    script_body = "#!/bin/sh\necho installed\n"
+    digest = _hl.sha256(script_body.encode()).hexdigest()
+
+    executed = {"cmd": None}
+    real_http, real_run = mod._http_request, mod.run_command
+    mod._http_request = lambda url, **kw: (0, script_body.encode())
+    mod.run_command = lambda command, message: (executed.__setitem__("cmd", command), True)[1]
+
+    try:
+        # 非交互(EOF):拒绝执行 —— fail-closed,对齐 thcli 非 TTY 拒绝口径
+        mod._ASSUME_YES = False
+        mod.ask = lambda p="": (_ for _ in ()).throw(EOFError)
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            passed = mod.run_remote_script(
+                "https://example.com/install.sh", ("--flag",), "TestTool")
+        out = buf.getvalue()
+        check("远程脚本: 非交互拒绝执行(fail-closed)",
+              passed is False and executed["cmd"] is None)
+        check("远程脚本: 展示来源与 SHA256",
+              "https://example.com/install.sh" in out and digest in out)
+
+        # 明确拒绝
+        mod.ask = lambda p="": "n"
+        with contextlib.redirect_stdout(_io.StringIO()):
+            passed = mod.run_remote_script(
+                "https://example.com/install.sh", ("--flag",), "TestTool")
+        check("远程脚本: 用户拒绝 → 不执行", passed is False and executed["cmd"] is None)
+
+        # --yes 跳过确认仍执行
+        mod._ASSUME_YES = True
+        with contextlib.redirect_stdout(_io.StringIO()):
+            passed = mod.run_remote_script(
+                "https://example.com/install.sh", ("--flag",), "TestTool")
+        cmd = executed["cmd"]
+        check("远程脚本: --yes 直接执行", passed is True and cmd is not None)
+        check("远程脚本: 以本地文件执行(非管道),参数透传",
+              cmd[0] == "bash" and cmd[1].endswith(".sh") and cmd[2] == "--flag")
+
+        # 下载失败(HTTP 错误)
+        mod._http_request = lambda url, **kw: (404, b"not found")
+        with contextlib.redirect_stdout(_io.StringIO()):
+            passed = mod.run_remote_script(
+                "https://example.com/install.sh", (), "TestTool")
+        check("远程脚本: 下载 404 → 失败", passed is False)
+
+        # 网络层失败
+        def _raise(url, **kw):
+            raise RuntimeError("conn refused")
+        mod._http_request = _raise
+        with contextlib.redirect_stdout(_io.StringIO()):
+            passed = mod.run_remote_script(
+                "https://example.com/install.sh", (), "TestTool")
+        check("远程脚本: 网络失败 → 失败且不抛异常", passed is False)
+    finally:
+        mod._ASSUME_YES = False
+        mod._http_request = real_http
+        mod.run_command = real_run
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 远程目录完整性(SHA256 fail-closed)
+
+def test_catalog_integrity():
+    mod = load_module()
+    import contextlib, hashlib as _hl, io as _io
+    catalog_bytes = (REPO / "models.json").read_bytes()
+    digest = _hl.sha256(catalog_bytes).hexdigest()
+
+    def _fetch_map(body_map):
+        def _fetch(url, **kw):
+            if url not in body_map:
+                raise RuntimeError(f"unexpected url {url}")
+            return 0, body_map[url]
+        return _fetch
+
+    real_http = mod._http_request
+    try:
+        # 1) 哈希匹配 → 远程目录生效
+        mod._REMOTE_CATALOG = None
+        mod._http_request = _fetch_map({
+            mod.REMOTE_CATALOG_URL: catalog_bytes,
+            mod.REMOTE_CATALOG_SHA256_URL: f"{digest}  models.json\n".encode(),
+        })
+        with contextlib.redirect_stdout(_io.StringIO()):
+            mod.refresh_remote_catalog()
+        check("目录校验: 哈希匹配 → 采用远程", mod._REMOTE_CATALOG is not None)
+
+        # 2) 哈希不匹配 → 回退内置
+        mod._REMOTE_CATALOG = None
+        mod._http_request = _fetch_map({
+            mod.REMOTE_CATALOG_URL: catalog_bytes,
+            mod.REMOTE_CATALOG_SHA256_URL: ("0" * 64).encode(),
+        })
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            mod.refresh_remote_catalog()
+        check("目录校验: 哈希不匹配 → 回退内置", mod._REMOTE_CATALOG is None)
+        check("目录校验: 不匹配时给出警告", "SHA256" in buf.getvalue())
+
+        # 3) .sha256 获取失败 → 回退内置(fail-closed)
+        def _fetch_404(url, **kw):
+            if url == mod.REMOTE_CATALOG_SHA256_URL:
+                return 404, b"not found"
+            return 0, catalog_bytes
+        mod._REMOTE_CATALOG = None
+        mod._http_request = _fetch_404
+        with contextlib.redirect_stdout(_io.StringIO()):
+            mod.refresh_remote_catalog()
+        check("目录校验: 哈希文件缺失 → 回退内置(fail-closed)",
+              mod._REMOTE_CATALOG is None)
+    finally:
+        mod._http_request = real_http
+
+    # _parse_sha256 宽松解析(sha256sum 常见两种形态)
+    check("sha256 解析: sha256sum 双空格格式",
+          mod._parse_sha256(f"{digest}  models.json\n") == digest)
+    check("sha256 解析: 裸哈希", mod._parse_sha256(digest) == digest)
+    check("sha256 解析: 无效内容 → None", mod._parse_sha256("no digest here") is None)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 退出码契约(0/1/2/3)
+
+def test_exit_codes():
+    mod = load_module()
+    sandbox(mod)
+    mod.verify_api_key = lambda *a: True
+    mod.fetch_remote_models = lambda *a: None
+    mod.check_prerequisites = lambda tools: True
+    mod.refresh_remote_catalog = lambda: None
+    mod.run_remote_script = lambda url, sargs, name: False
+
+    def run(argv, answers=None):
+        sys.argv = argv
+        if answers is None:
+            mod.ask = lambda p="": (_ for _ in ()).throw(EOFError)
+        else:
+            it = iter(answers)
+            mod.ask = lambda p="": next(it)
+        os.environ.pop("TOKENPLAN_API_KEY", None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            return mod.main(), buf.getvalue()
+
+    # 未选择工具 → 用户取消(1)
+    code, _ = run(["x", "--plan", "enterprise-pro"],
+                  ["sk-fake-key-1234567890", "1", "none"])
+    check("退出码: 未选工具 → 1", code == 1)
+
+    # 配置器抛错 → 配置失败(3)
+    real_cfg = dict(mod.CONFIGURATOR_REGISTRY)
+    def _boom(base, key, plan):
+        raise RuntimeError("boom")
+    for k in real_cfg:
+        mod.CONFIGURATOR_REGISTRY[k] = _boom
+    code, _ = run(["x", "--plan", "enterprise-pro",
+                   "--api-key", "sk-fake-key-1234567890",
+                   "--tools", "codex", "--verify-models", "off"], ["1"])
+    check("退出码: 配置失败 → 3", code == 3)
+    mod.CONFIGURATOR_REGISTRY.clear()
+    mod.CONFIGURATOR_REGISTRY.update(real_cfg)
+
+    # 全部成功 → 0
+    code, _ = run(["x", "--plan", "enterprise-pro",
+                   "--api-key", "sk-fake-key-1234567890",
+                   "--tools", "codex", "--verify-models", "off"], ["1"])
+    check("退出码: 配置成功 → 0", code == 0)
+
+    # doctor:已安装但配置缺失 → 3(全新沙箱,probe 面对不存在的配置文件)
+    sandbox(mod)
+    mod.is_tool_installed = lambda t: True
+    code, _ = run(["x", "doctor", "--tools", "codex"])
+    check("退出码: doctor 配置缺失 → 3", code == 3)
+
+    # doctor --deep 缺 --plan / 缺 Key → 2
+    code, _ = run(["x", "doctor", "--deep", "--tools", "codex"])
+    check("退出码: doctor --deep 缺 --plan → 2", code == 2)
+    code, _ = run(["x", "doctor", "--deep", "--plan", "enterprise-pro",
+                   "--tools", "codex"])
+    check("退出码: doctor --deep 缺 Key → 2", code == 2)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: --json 结构化输出(密钥打码,stdout 干净)
+
+def test_json_mode():
+    mod = load_module()
+    sandbox(mod)
+    mod.verify_api_key = lambda *a: True
+    mod.fetch_remote_models = lambda *a: None
+    mod.check_prerequisites = lambda tools: True
+    mod.refresh_remote_catalog = lambda: None
+
+    # setup --json
+    sys.argv = ["x", "--plan", "enterprise-pro",
+                "--api-key", "sk-fake-key-1234567890",
+                "--tools", "codex", "--json", "--verify-models", "off"]
+    mod.ask = lambda p="": (_ for _ in ()).throw(EOFError)
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+        code = mod.main()
+    payload = json.loads(out_buf.getvalue())
+    check("JSON: stdout 只有合法 JSON", isinstance(payload, dict))
+    check("JSON: 退出码字段一致", payload.get("exit_code") == code == 0)
+    check("JSON: 密钥打码(不落明文)",
+          payload.get("api_key") != "sk-fake-key-1234567890"
+          and payload.get("api_key", "").startswith("sk-f"))
+    check("JSON: 工具结果数组",
+          payload["tools"][0]["key"] == "codex"
+          and payload["tools"][0]["status"] == "configured")
+    check("JSON: 过程日志转 stderr", "Codex" in err_buf.getvalue())
+    check("JSON: stdout 无过程日志", "已配置" not in out_buf.getvalue())
+
+    # doctor --json
+    sandbox(mod)
+    mod.is_tool_installed = lambda t: True
+    sys.argv = ["x", "doctor", "--tools", "codex", "--json"]
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+        code = mod.main()
+    payload = json.loads(out_buf.getvalue())
+    check("JSON: doctor 结构化结果",
+          payload.get("command") == "doctor"
+          and payload["tools"][0]["key"] == "codex")
+    check("JSON: doctor 退出码 = 3(配置缺失)", code == 3 and payload["exit_code"] == 3)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: TOKENPLAN_API_KEY 环境变量
+
+def test_env_key():
+    mod = load_module()
+    sandbox(mod)
+    mod.verify_api_key = lambda *a: True
+    mod.fetch_remote_models = lambda *a: None
+    mod.check_prerequisites = lambda tools: True
+    mod.refresh_remote_catalog = lambda: None
+
+    sys.argv = ["x", "--plan", "enterprise-pro", "--tools", "none"]
+    mod.ask = lambda p="": (_ for _ in ()).throw(EOFError)
+    os.environ["TOKENPLAN_API_KEY"] = "sk-from-env-1234567890"
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            mod.main()
+        out = buf.getvalue()
+        check("环境变量 Key: 从 TOKENPLAN_API_KEY 读取", "TOKENPLAN_API_KEY 读取" in out)
+        check("环境变量 Key: 不再提示粘贴", "请粘贴" not in out)
+    finally:
+        os.environ.pop("TOKENPLAN_API_KEY", None)
+
+    # 环境变量 Key 过短 → 警告并回退交互输入(第一个答案被当作 Key 消费)
+    os.environ["TOKENPLAN_API_KEY"] = "short"
+    try:
+        answers = iter(["sk-fake-key-1234567890", "1", "none"])
+        prompts = []
+        def _ask(prompt=""):
+            prompts.append(prompt)
+            return next(answers)
+        mod.ask = _ask
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            mod.main()
+        check("环境变量 Key: 过短则警告并回退交互",
+              "长度过短" in buf.getvalue() and "已忽略" in buf.getvalue()
+              and "请粘贴 API Key" in prompts[0])
+    finally:
+        os.environ.pop("TOKENPLAN_API_KEY", None)
+
+
+# ---------------------------------------------------------------------------
+# 测试组: 共享 HTTP 入口 _http_request
+
+def test_http_helper():
+    mod = load_module()
+    real = mod.urllib.request.urlopen
+    import urllib.error as _ue
+
+    try:
+        # 成功:status 0 + 原始字节
+        mod.urllib.request.urlopen = lambda req, timeout=None: io.BytesIO(b'{"data":[]}')
+        status, body = mod._http_request("https://x/models")
+        check("HTTP: 成功返回 0+原始字节", status == 0 and body == b'{"data":[]}')
+
+        # HTTPError → (code, body),不抛异常
+        def _err(req, timeout=None):
+            raise _ue.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                io.BytesIO(b'{"error":{"message":"bad"}}'))
+        mod.urllib.request.urlopen = _err
+        status, body = mod._http_request("https://x/models", api_key="k")
+        check("HTTP: HTTPError → (code, body)", status == 401 and b"bad" in body)
+
+        # 传输层错误 → RuntimeError(调用方决定提示口径)
+        def _netfail(req, timeout=None):
+            raise OSError("connection refused")
+        mod.urllib.request.urlopen = _netfail
+        try:
+            mod._http_request("https://x/models")
+            check("HTTP: 传输错误 → RuntimeError", False)
+        except RuntimeError as exc:
+            check("HTTP: 传输错误 → RuntimeError", "connection refused" in str(exc))
+
+        # POST:payload 自动 JSON 编码 + 认证/类型头注入
+        captured = {}
+        def _capture(req, timeout=None):
+            captured["data"] = req.data
+            captured["headers"] = dict(req.headers)
+            return io.BytesIO(b"{}")
+        mod.urllib.request.urlopen = _capture
+        status, _ = mod._http_request(
+            "https://x/chat/completions", api_key="sk-k",
+            payload={"model": "m", "max_tokens": 1})
+        auth = next((v for k, v in captured["headers"].items()
+                     if k.lower() == "authorization"), "")
+        ctype = next((v for k, v in captured["headers"].items()
+                      if k.lower() == "content-type"), "")
+        check("HTTP: payload JSON 编码",
+              json.loads(captured["data"].decode())["model"] == "m")
+        check("HTTP: Authorization 头注入", auth == "Bearer sk-k")
+        check("HTTP: Content-Type 头注入", "application/json" in ctype)
+    finally:
+        mod.urllib.request.urlopen = real
+
+
+# ---------------------------------------------------------------------------
+# 测试组: doctor --deep 端到端验证
+
+def test_doctor_deep():
+    mod = load_module()
+    tmp = sandbox(mod)
+    mod.check_prerequisites = lambda tools: True
+    mod.is_tool_installed = lambda t: True
+    cfg = tmp / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('[model_providers.tokenplan]\nname = "Token Plan"\n')
+
+    plan = mod.PLAN_CATALOG["3"]
+    import contextlib, io as _io
+    mod.test_model = lambda base, key, model: (True, "")
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = mod.run_doctor([mod.TOOL_BY_KEY["codex"]], deep=True,
+                              plan=plan, api_key="sk-k")
+    check("doctor --deep: 端到端通过 → 0", code == 0 and "端到端可用" in buf.getvalue())
+
+    mod.test_model = lambda base, key, model: (False, "HTTP 401: bad key")
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = mod.run_doctor([mod.TOOL_BY_KEY["codex"]], deep=True,
+                              plan=plan, api_key="sk-bad")
+    check("doctor --deep: 端到端失败 → 3", code == 3 and "端到端失败" in buf.getvalue())
+
+    with contextlib.redirect_stdout(_io.StringIO()):
+        code = mod.run_doctor([mod.TOOL_BY_KEY["codex"]], deep=True,
+                              plan=None, api_key="sk-k")
+    check("doctor --deep: 缺 --plan → 2", code == 2)
+    with contextlib.redirect_stdout(_io.StringIO()):
+        code = mod.run_doctor([mod.TOOL_BY_KEY["codex"]], deep=True,
+                              plan=plan, api_key="")
+    check("doctor --deep: 缺 Key → 2", code == 2)
+
+
 TEST_GROUPS = [
     ("registry", test_registry),
     ("registry-windows", test_registry_windows),
@@ -886,6 +1384,16 @@ TEST_GROUPS = [
     ("ux", test_ux_helpers),
     ("interactions", test_main_interactions),
     ("catalog", test_remote_catalog),
+    ("deep-merge", test_deep_merge),
+    ("codebuddy-merge", test_codebuddy_user_models_preserved),
+    ("install-policy", test_install_policy),
+    ("remote-script", test_remote_script),
+    ("catalog-integrity", test_catalog_integrity),
+    ("exit-codes", test_exit_codes),
+    ("json-mode", test_json_mode),
+    ("env-key", test_env_key),
+    ("http", test_http_helper),
+    ("doctor-deep", test_doctor_deep),
     ("consistency", test_repo_consistency),
 ]
 

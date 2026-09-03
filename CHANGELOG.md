@@ -2,6 +2,79 @@
 
 本项目的显著变更记录在此。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.5.0] - 2026-09-03
+
+### 安全与规范性(对齐官方 tokenhub-cli 的工程标准)
+
+**① 修复 `write_json` 浅合并静默丢失用户配置(严重)**
+
+`merge=True` 此前用 `existing.update(data)` 只合并顶层——用户 opencode/
+openclaw/claude/codebuddy 配置里**同级的其它 provider 会被整块顶掉**。
+现在改为递归深合并:dict 逐键下钻,嵌套 list 在给定 `merge_key` 时按
+标识合并(保留用户条目,仅替换/追加我方条目),其余类型以新值覆盖。
+`.codebuddy/models.json` 同时补上 `merge_key="id"`(此前全量重写,
+用户自建模型会丢,与 WorkBuddy 的合并标准不一致)。
+
+**② 远程安装脚本不再 `curl | bash` 盲执行**
+
+hermes / openclaw(macOS)此前直接管道执行第三方远程脚本。现在:
+先完整下载到本地临时文件 → 展示来源 URL、SHA256 与大小 → 交互确认
+→ 才执行。非交互环境一律拒绝(fail-closed)。上游官方脚本未发布固定
+哈希,无法做下载前校验,这是该约束下的最大化改进。`--yes` 跳过确认
+但指纹仍完整打印。系统 curl 依赖同时取消(改用 Python 内建下载)。
+
+**③ npm 安装统一 `--ignore-scripts`**
+
+此前仅 Pi 加了该参数。npm lifecycle 脚本是供应链攻击重点面(新版 npm
+默认拦截的正是它),这些 CLI 均通过平台包分发二进制、不需要安装期脚本。
+
+**④ 远程模型目录加 SHA256 完整性校验(fail-closed)**
+
+`models.json` 从 jsDelivr 拉取时无任何完整性校验。现在同时拉取
+`models.json.sha256`(由 `sync_npm_lib.py` 自动再生),哈希不匹配或
+拿不到哈希文件 → 一律回退内置目录,绝不下发无法证明完整性的内容——
+CDN 缓存错位与劫持同归此路径。
+
+**⑤ 退出码契约规范化**
+
+失败路径此前返回 0,脚本/CI 无法判断成败。现在:`0=成功 1=用户取消
+2=环境不满足 3=部分工具配置失败`;doctor 按健康度返回(配置缺失=3、
+前置不满足=2)。
+
+**⑥ `--json` 结构化输出(setup / doctor)**
+
+过程日志转 stderr,stdout 只输出结果 JSON;**密钥在 JSON 里一律打码**
+(JSON 会被转发、落盘、进对话历史,暴露面远大于终端看一眼)。
+字段:`plan` / `base_url` / `models` / `tools[]`(configured|failed|
+skipped + error)/ `verified` / `exit_code`。
+
+**⑦ `TOKENPLAN_API_KEY` 环境变量**
+
+Key 解析顺序:`--api-key` 参数 > 环境变量 > 交互输入。命令行参数会留在
+shell 历史里,自动化场景推荐环境变量。
+
+**⑧ `doctor --deep` 端到端验证**
+
+doctor 此前只查"装没装/配没配"。`--deep --plan <key>` + Key 会真实调用
+一次对话接口验证套餐默认模型可用(Key 吊销/套餐过期/模型下线立刻暴露),
+需联网、按量计费套餐消耗极少量 token。
+
+### 架构收敛(对齐 thcli `core/http-agent.ts` 的教训)
+
+全部 5 处出站 HTTP(目录刷新、目录哈希、模型发现、Key 验证、端到端
+测试)收敛到唯一入口 `_http_request()`:统一的超时、User-Agent、认证头、
+HTTPError/传输错误分级。thcli 曾因三处客户端各自拼装漏传配置踩过
+`EPROTO`,这类收敛正是为杜绝同款事故。
+
+### 测试
+
+169 → 229 项(+60):深合并、codebuddy 用户模型保留、安装策略、远程
+脚本 fail-closed、目录哈希三态、退出码契约、JSON 输出、环境变量 Key、
+HTTP 入口、doctor --deep;`models.json.sha256` 一致性纳入 consistency 组
+(改目录忘刷哈希会被 CI 拦下)。
+
+[2.5.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.5.0
+
 ## [2.4.0] - 2026-09-03
 
 ### 新增:国际站后付费(选项 9)

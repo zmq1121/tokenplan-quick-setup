@@ -2,6 +2,7 @@
 # setup.command 是 bash/Python 多态脚本,必须 LF
 setup.command text eol=lf
 npm/lib/setup.command text eol=lf
+tokenplan_setup/_model_catalog.py text eol=lf
 
 # Windows 批处理必须 CRLF
 setup.bat text eol=crlf

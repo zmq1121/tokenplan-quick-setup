@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokenplan-setup"
-version = "2.7.0"
+version = "2.7.1"
 description = "腾讯云 TokenHub 一键接入 CLI"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -52,7 +52,7 @@ skip_covered = true
 [tool.ruff]
 target-version = "py39"
 line-length = 100
-extend-exclude = ["setup.command", "npm/lib/setup.command", "tests/run_tests.py"]
+extend-exclude = ["setup.command", "npm/lib/setup.command", "tests/run_tests.py", "build"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]

@@ -4,7 +4,7 @@
 
 - 维护源码:`tokenplan_setup/`(按基础设施、领域、适配器、流程、CLI 分层)
 - 发布产物:`setup.command`(由 `scripts/build_dist.py` 确定性生成的 bash/Python 多态单文件,零第三方运行时依赖)
-- 当前版本:2.7.0(npm `tokenplan-setup@2.7.0`)
+- 当前版本:2.7.1(npm `tokenplan-setup@2.7.1`)
 
 ---
 

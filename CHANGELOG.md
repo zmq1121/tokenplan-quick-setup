@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-09-03
+
+### 修复
+
+- CI: `ruff` 排除 `build/` 目录。`pip install .` 在 CI 会生成 `build/lib`，
+  其中的镜像源码不应参与静态检查，否则会出现与工作树无关的 F401 误报
+- 跨平台一致性: `tokenplan_setup/_model_catalog.py` 固定 `LF` 行尾，避免
+  Windows checkout 转换为 `CRLF` 导致 `scripts/build_dist.py --check`
+  和 `tests/test_build_artifacts.py` 误判产物过期
+
 ## [2.7.0] - 2026-09-03
 
 ### 新增

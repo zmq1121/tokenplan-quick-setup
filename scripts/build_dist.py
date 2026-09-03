@@ -79,7 +79,8 @@ def updated_bat(script: bytes, version: str) -> bytes:
     )
     if version_count != 1 or hash_count != 1:
         raise ValueError("setup.bat metadata markers missing or duplicated")
-    return text.encode("utf-8")
+    # setup.bat 必须是 CRLF；否则 cmd 的兼容性与回归契约都会漂移。
+    return text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
 
 
 def expected_outputs() -> Dict[Path, bytes]:

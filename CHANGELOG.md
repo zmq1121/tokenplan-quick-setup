@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [2.7.7] - 2026-09-04
+
 ### 测试套件加固(2026-09-04 测试架构审查,全部实测复现后修复)
 
 - **P0:interactions 组补齐安装桩**——此前未 stub
@@ -768,3 +770,5 @@ ZCode 现已补齐);TRAE 与 Cursor 按 arkcli 官方结论(模型配置
 - 每次写入前备份至 ~/.tokenplan-backups(manifest 可追溯)
 
 [1.0.0]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v1.0.0
+
+[2.7.7]: https://github.com/zmq1121/tokenplan-quick-setup/releases/tag/v2.7.7
